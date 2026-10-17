@@ -1,0 +1,26 @@
+name: Native builds
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolver tests
+        run: cargo test --locked --no-default-features --lib
+      - name: Desktop state tests
+        run: cargo test --locked --bin nswpedia-search
+      - name: Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/Build-Windows.ps1 -Release
+      - name: macOS app bundle
+        if: runner.os == 'macOS'
+        run: bash scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nswpedia-${{ matrix.os }}
+          path: dist/

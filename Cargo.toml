@@ -1,0 +1,46 @@
+[package]
+name = "nswpedia-search"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Native NSWpedia search and 1fichier link resolver"
+license = "MIT"
+default-run = "nswpedia-search"
+
+[dependencies]
+anyhow = "1"
+async-channel = "2"
+directories = "6"
+gpui-kit = { version = "=0.7.3", optional = true }
+html-escape = "0.2"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+scraper = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:gpui-kit"]
+
+[[bin]]
+name = "nswpedia-search"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+strip = true
+lto = "thin"
+
+[[bin]]
+name = "nswpedia-check"
+path = "src/check.rs"

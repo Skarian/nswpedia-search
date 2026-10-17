@@ -1,0 +1,9 @@
+{
+  "Process": "nswpedia-search",
+  "Title": "NSWpedia Search",
+  "Responding": true,
+  "MemoryMB": 75.0,
+  "ListeningPorts": 0,
+  "StderrBytes": 0,
+  "WebStatus": 200
+}

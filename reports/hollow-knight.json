@@ -1,0 +1,27 @@
+{
+  "query": "Hollow Knight",
+  "game": {
+    "id": 5627,
+    "title": "Hollow Knight",
+    "slug": "hollow-knight",
+    "source_url": "https://nswpedia.com/nintendo-switch-roms/action/hollow-knight"
+  },
+  "results": 4,
+  "first_link_ms": 1438,
+  "total_ms": 1967,
+  "links": [
+    {
+      "key": "05deb3029d6318c4",
+      "url": "https://1fichier.com/?k50hvxtyhyc9utrctppt?af=5006637"
+    },
+    {
+      "key": "6b945a10100f565f",
+      "url": "https://1fichier.com/?xskccdfmmiwpyf0f8drk?af=5006637"
+    },
+    {
+      "key": "32c04b467750fb35",
+      "url": "https://1fichier.com/?4c2k0vth32qalrv3fbxw?af=5006637"
+    }
+  ],
+  "errors": []
+}
