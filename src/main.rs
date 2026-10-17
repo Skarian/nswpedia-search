@@ -10,8 +10,8 @@ use gpui_kit::*;
 use nswpedia_search::resolver::{
     BATCH_SIZE, Cancel, FileEntry, Game, ResolveEvent, Resolver, SearchPage,
 };
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use style::{BG, CYAN, DIM, LINE, LINE_HI, MAGENTA, PANEL, TEXT, c, ca};
+use std::{collections::HashMap, sync::Arc};
+use style::{ACCENT, BG, DIM, LINE, LINE_HI, PANEL, TEXT, c, ca};
 
 gpui_kit::actions!(search_app, [FocusSearch, Quit]);
 
@@ -90,9 +90,6 @@ struct SearchApp {
     resolve_error: Option<String>,
     copied: Option<String>,
     copy_seq: u64,
-    blink: bool,
-    glitch: u64,
-    _ticker: Task<()>,
 }
 impl Drop for SearchApp {
     fn drop(&mut self) {
@@ -125,30 +122,6 @@ impl SearchApp {
                 }
             }
         });
-        // Cursor blink and the periodic logo glitch, driven by a slow timer so
-        // the idle window only repaints a couple of times per second.
-        let ticker = cx.spawn(async move |this, cx| {
-            let mut tick = 0u64;
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(530))
-                    .await;
-                tick += 1;
-                let alive = this.update(cx, |this, cx| {
-                    if cx.reduce_motion() {
-                        return;
-                    }
-                    this.blink = !this.blink;
-                    if tick % 15 == 0 {
-                        this.glitch += 1;
-                    }
-                    cx.notify();
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
         let mut this = Self {
             input,
             resolver,
@@ -174,9 +147,6 @@ impl SearchApp {
             resolve_error: None,
             copied: None,
             copy_seq: 0,
-            blink: true,
-            glitch: 0,
-            _ticker: ticker,
         };
         if let Some(initial) = initial {
             this.input
@@ -381,20 +351,20 @@ fn main() -> anyhow::Result<()> {
         colors.muted_foreground = c(DIM);
         colors.border = c(LINE);
         colors.input = c(LINE_HI);
-        colors.caret = c(CYAN);
-        colors.selection = ca(MAGENTA, 0.35);
-        colors.primary = c(CYAN);
-        colors.primary_hover = ca(CYAN, 0.85);
-        colors.primary_active = ca(CYAN, 0.7);
+        colors.caret = c(ACCENT);
+        colors.selection = ca(ACCENT, 0.25);
+        colors.primary = c(ACCENT);
+        colors.primary_hover = ca(ACCENT, 0.85);
+        colors.primary_active = ca(ACCENT, 0.7);
         colors.primary_foreground = c(BG);
-        colors.ring = c(CYAN);
-        colors.accent = ca(CYAN, 0.12);
+        colors.ring = c(LINE_HI);
+        colors.accent = ca(TEXT, 0.06);
         colors.accent_foreground = c(TEXT);
         colors.popover = c(PANEL);
         colors.popover_foreground = c(TEXT);
         colors.scrollbar = ca(BG, 0.);
-        colors.scrollbar_thumb = ca(CYAN, 0.25);
-        colors.scrollbar_thumb_hover = ca(CYAN, 0.5);
+        colors.scrollbar_thumb = c(LINE_HI);
+        colors.scrollbar_thumb_hover = ca(DIM, 0.6);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("secondary-l", FocusSearch, Some("SearchApp")),

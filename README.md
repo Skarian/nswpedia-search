@@ -7,7 +7,7 @@ accepted on October 17, 2026; the web version has been retired.
 
 Project location: C:\Users\Neil\projects\nswpedia-search.
 
-Search with Enter or the EXEC button. The first result resolves automatically.
+Search with Enter or the search button. The first result resolves automatically.
 Select another title to resolve it; source-page buttons open the original page
 in your default browser. Copy individual URLs or all ready URLs. Ctrl+L (Cmd+L
 on macOS) focuses search. No recent-search UI. URLs are 1fichier landing links;
@@ -75,9 +75,9 @@ ad rejection, cache persistence/expiry, concurrent deduplication and cancellatio
 - Source-page layout changes surface errors and a retry action. No automated
   crawl, alternate mirror probing, credentials, or authenticated API use.
 
-The interface is a terminal-style, neon-on-black design (monospace type,
-scanlines, glitch/decode/typewriter motion). Animations follow the OS
-reduce-motion setting; the idle window repaints only for the cursor blink.
+The interface is a restrained, terminal-inspired dark design: monospace type,
+one muted green accent, and brief fades plus small spinners while work is in
+flight. Nothing animates while the window is idle.
 
 No startup registration is created. Closing the window quits the app.
 
