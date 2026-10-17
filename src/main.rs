@@ -1,14 +1,17 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod style;
+mod view;
+
 use gpui_kit::component::{
-    Disableable, Sizable, Theme, ThemeMode,
-    button::{Button, ButtonVariants},
-    input::{Input, InputEvent, InputState},
+    Theme, ThemeMode,
+    input::{InputEvent, InputState},
 };
 use gpui_kit::*;
 use nswpedia_search::resolver::{
     BATCH_SIZE, Cancel, FileEntry, Game, ResolveEvent, Resolver, SearchPage,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use style::{BG, CYAN, DIM, LINE, LINE_HI, MAGENTA, PANEL, TEXT, c, ca};
 
 gpui_kit::actions!(search_app, [FocusSearch, Quit]);
 
@@ -86,6 +89,10 @@ struct SearchApp {
     search_error: Option<String>,
     resolve_error: Option<String>,
     copied: Option<String>,
+    copy_seq: u64,
+    blink: bool,
+    glitch: u64,
+    _ticker: Task<()>,
 }
 impl Drop for SearchApp {
     fn drop(&mut self) {
@@ -100,7 +107,7 @@ impl SearchApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search games"));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("type a game title…"));
         let subscription = cx.subscribe_in(&input, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
                 this.search(false, cx);
@@ -114,6 +121,30 @@ impl SearchApp {
                     .update(cx, |this, cx| this.receive(message, cx))
                     .is_err()
                 {
+                    break;
+                }
+            }
+        });
+        // Cursor blink and the periodic logo glitch, driven by a slow timer so
+        // the idle window only repaints a couple of times per second.
+        let ticker = cx.spawn(async move |this, cx| {
+            let mut tick = 0u64;
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(530))
+                    .await;
+                tick += 1;
+                let alive = this.update(cx, |this, cx| {
+                    if cx.reduce_motion() {
+                        return;
+                    }
+                    this.blink = !this.blink;
+                    if tick % 15 == 0 {
+                        this.glitch += 1;
+                    }
+                    cx.notify();
+                });
+                if alive.is_err() {
                     break;
                 }
             }
@@ -142,6 +173,10 @@ impl SearchApp {
             search_error: None,
             resolve_error: None,
             copied: None,
+            copy_seq: 0,
+            blink: true,
+            glitch: 0,
+            _ticker: ticker,
         };
         if let Some(initial) = initial {
             this.input
@@ -318,235 +353,8 @@ impl SearchApp {
         }
         cx.write_to_clipboard(ClipboardItem::new_string(urls.join("\n")));
         self.copied = Some(key.unwrap_or("all").to_string());
+        self.copy_seq += 1;
         cx.notify();
-    }
-}
-impl Render for SearchApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut results = div()
-            .id("results")
-            .w(px(286.))
-            .flex_shrink_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_3()
-            .border_r_1()
-            .border_color(rgb(0x2a373b))
-            .bg(rgb(0x131d20));
-        if self.search_busy {
-            results = results.child(div().p_2().text_color(rgb(0x9caeac)).child("Searching…"));
-        }
-        if let Some(error) = &self.search_error {
-            results = results.child(div().p_2().text_color(rgb(0xefb786)).child(error.clone()));
-        }
-        if self.searched
-            && !self.search_busy
-            && self.games.is_empty()
-            && self.search_error.is_none()
-        {
-            results = results.child(div().p_2().child("No results"));
-        }
-        for (index, game) in self.games.iter().enumerate() {
-            let url = game.source_url.clone();
-            results = results.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .mb_1()
-                    .child(
-                        Button::new(("game", index))
-                            .ghost()
-                            .flex_1()
-                            .min_w_0()
-                            .h_auto()
-                            .py_3()
-                            .bg(rgb(if self.selected == Some(index) {
-                                0x27352b
-                            } else {
-                                0x131d20
-                            }))
-                            .label(game.title.clone())
-                            .on_click(cx.listener(move |this, _, _, cx| this.select(index, cx))),
-                    )
-                    .child(
-                        Button::new(("source", index))
-                            .ghost()
-                            .small()
-                            .label("↗")
-                            .tooltip("Open source page")
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
-                    ),
-            );
-        }
-        if self.page < self.total_pages && self.page < 100 {
-            results = results.child(
-                Button::new("more-results")
-                    .ghost()
-                    .label("More results")
-                    .disabled(self.search_busy)
-                    .on_click(cx.listener(|this, _, _, cx| this.search(true, cx))),
-            );
-        }
-        let mut detail = div()
-            .id("files")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_6();
-        if let Some(game) = self.selected.and_then(|i| self.games.get(i)) {
-            let url = game.source_url.clone();
-            detail = detail.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .mb_5()
-                    .child(div().flex_1().text_xl().child(game.title.clone()))
-                    .child(
-                        Button::new("source-page")
-                            .ghost()
-                            .small()
-                            .label("Source page ↗")
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
-                    ),
-            );
-            if self.files.iter().filter(|r| r.url.is_some()).count() > 1 {
-                detail = detail.child(
-                    div().flex().justify_end().mb_2().child(
-                        Button::new("copy-all")
-                            .small()
-                            .label(if self.copied.as_deref() == Some("all") {
-                                "Copied"
-                            } else {
-                                "Copy all"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| this.copy(None, cx))),
-                    ),
-                );
-            }
-            if self.files.is_empty() {
-                let status = if self.resolve_busy {
-                    "Loading files…"
-                } else if self.resolve_error.is_none() {
-                    "No 1fichier links listed"
-                } else {
-                    ""
-                };
-                detail = detail.child(div().text_color(rgb(0x9caeac)).child(status));
-            }
-            for (index, row) in self.files.iter().enumerate() {
-                let key = row.file.key.clone();
-                let mut info = div().flex_1().min_w_0().child(row.file.name.clone()).child(
-                    div()
-                        .text_xs()
-                        .mt_1()
-                        .text_color(rgb(0x9caeac))
-                        .child(format!("{}  {}", row.file.size, row.file.format)),
-                );
-                if let Some(url) = &row.url {
-                    info = info.child(
-                        div()
-                            .text_xs()
-                            .mt_2()
-                            .text_color(rgb(0xc0dca0))
-                            .child(url.clone()),
-                    );
-                } else if let Some(error) = &row.error {
-                    info = info.child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0xefb786))
-                            .child(error.clone()),
-                    );
-                } else {
-                    info = info.child(div().text_xs().text_color(rgb(0x9caeac)).child(
-                        if self.resolve_busy
-                            && (self.batch_offset..self.batch_offset + BATCH_SIZE).contains(&index)
-                        {
-                            "Resolving…"
-                        } else {
-                            "Pending"
-                        },
-                    ));
-                }
-                let mut line = div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .py_4()
-                    .border_t_1()
-                    .border_color(rgb(0x2a373b))
-                    .child(info);
-                if row.url.is_some() {
-                    line = line.child(
-                        Button::new(("copy", index))
-                            .small()
-                            .label(if self.copied.as_deref() == Some(&key) {
-                                "Copied"
-                            } else {
-                                "Copy"
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| this.copy(Some(&key), cx))),
-                    );
-                }
-                detail = detail.child(line);
-            }
-            if let Some(error) = &self.resolve_error {
-                detail = detail
-                    .child(div().text_color(rgb(0xefb786)).my_3().child(error.clone()))
-                    .child(Button::new("retry").label("Retry").on_click(cx.listener(
-                        |this, _, _, cx| {
-                            let offset = failed_batch(&this.files).unwrap_or(this.batch_offset);
-                            this.resolve(offset, cx);
-                        },
-                    )));
-            }
-            if let Some(offset) = self.next_offset {
-                detail = detail.child(
-                    Button::new("more-files")
-                        .label("Resolve more")
-                        .on_click(cx.listener(move |this, _, _, cx| this.resolve(offset, cx))),
-                );
-            }
-        }
-        div()
-            .key_context("SearchApp")
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(0x101719))
-            .text_color(rgb(0xedf4ed))
-            .text_sm()
-            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.input.update(cx, |input, cx| input.focus(window, cx))
-            }))
-            .child(
-                div()
-                    .p_6()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(div().flex_1().child(Input::new(&self.input)))
-                    .child(
-                        Button::new("search")
-                            .primary()
-                            .label("Search")
-                            .on_click(cx.listener(|this, _, _, cx| this.search(false, cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .border_t_1()
-                    .border_color(rgb(0x2a373b))
-                    .bg(rgb(0x172023))
-                    .child(results)
-                    .child(detail),
-            )
     }
 }
 fn main() -> anyhow::Result<()> {
@@ -562,12 +370,31 @@ fn main() -> anyhow::Result<()> {
     application().with_assets(assets::Assets).run(move |cx| {
         init(cx);
         Theme::change(ThemeMode::Dark, None, cx);
-        let colors = &mut Theme::global_mut(cx).colors;
-        colors.primary = rgb(0xd6ef91).into();
-        colors.primary_hover = rgb(0xe1f5b0).into();
-        colors.primary_active = rgb(0xc0dca0).into();
-        colors.primary_foreground = rgb(0x273221).into();
-        colors.ring = rgb(0xd6ef91).into();
+        let theme = Theme::global_mut(cx);
+        theme.font_family = theme.mono_font_family.clone();
+        theme.radius = px(0.);
+        theme.radius_lg = px(0.);
+        theme.shadow = false;
+        let colors = &mut theme.colors;
+        colors.background = c(BG);
+        colors.foreground = c(TEXT);
+        colors.muted_foreground = c(DIM);
+        colors.border = c(LINE);
+        colors.input = c(LINE_HI);
+        colors.caret = c(CYAN);
+        colors.selection = ca(MAGENTA, 0.35);
+        colors.primary = c(CYAN);
+        colors.primary_hover = ca(CYAN, 0.85);
+        colors.primary_active = ca(CYAN, 0.7);
+        colors.primary_foreground = c(BG);
+        colors.ring = c(CYAN);
+        colors.accent = ca(CYAN, 0.12);
+        colors.accent_foreground = c(TEXT);
+        colors.popover = c(PANEL);
+        colors.popover_foreground = c(TEXT);
+        colors.scrollbar = ca(BG, 0.);
+        colors.scrollbar_thumb = ca(CYAN, 0.25);
+        colors.scrollbar_thumb_hover = ca(CYAN, 0.5);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("secondary-l", FocusSearch, Some("SearchApp")),
@@ -582,7 +409,7 @@ fn main() -> anyhow::Result<()> {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(1100.), px(720.)),
+                size(px(1180.), px(760.)),
                 cx,
             ))),
             window_min_size: Some(size(px(760.), px(420.))),
