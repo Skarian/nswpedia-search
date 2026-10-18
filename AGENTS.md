@@ -1,7 +1,9 @@
 # Agent notes
 
-Native Rust/GPUI desktop app. See README.md for features, build and install
-details. This file holds the rules agents must follow.
+Native Rust/GPUI desktop app. See README.md for features, docs/install.md for
+installing, docs/development.md for building and internals, and
+docs/releases.md for CI and publishing. This file holds the rules agents must
+follow.
 
 ## How validation and releases flow
 
@@ -94,5 +96,5 @@ downloads.
 - Packaged copies in `dist\` may be running. Use `Build-Windows.ps1 -Name <new>`
   instead of overwriting locked files.
 - Work on a feature branch and open a PR; the user merges to `main`.
-- `cargo fmt --all --check` and both test commands from the README must pass
+- `cargo fmt --all --check` and the test commands in docs/development.md must pass
   before pushing.

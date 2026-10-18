@@ -1,285 +1,51 @@
 # NSWpedia Search
 
-Native Rust/GPUI desktop application. Direct HTTPS requests, local SQLite cache,
-native text entry and clipboard. No webview, localhost service, Python, Node,
-SSH, VM, or relay is needed to run the executable. The desktop replacement was
-accepted on October 17, 2026; the web version has been retired.
+NSWpedia Search is a desktop app for Windows and macOS. It searches
+NSWpedia for Nintendo Switch titles and shows the 1fichier download link for
+each file.
 
-Project location: C:\Users\Neil\projects\nswpedia-search.
+![NSWpedia Search with results for "Hollow Knight" and three ready download links](docs/assets/readme/search.png)
 
-Search with Enter or the search button. The first result resolves automatically.
-Select another title to resolve it; source-page buttons open the original page
-in your default browser. Copy individual URLs or all ready URLs. Ctrl+L (Cmd+L
-on macOS) focuses search. No recent-search UI. URLs are 1fichier landing links.
+## Download
 
-## Install
+Get the app from the
+**[latest release](https://github.com/Skarian/nswpedia-search/releases/latest)**:
 
-Releases are on the repository's GitHub **Releases** page. The repository is
-private: sign in to GitHub in your browser, or use
-`gh release download <tag> -R Skarian/nswpedia-search`. Each release has a
-`SHA256SUMS.txt`; compare with `Get-FileHash <file>` (Windows) or
-`shasum -a 256 <file>` (macOS).
+- Windows 10 or 11: `nswpedia-search-<version>-windows-x64-setup.exe`
+- Mac with Apple silicon: `nswpedia-search-<version>-macos-arm64.dmg`
+- Mac with an Intel processor: `nswpedia-search-<version>-macos-x64.dmg`
 
-These builds are free and unsigned: no paid Windows code-signing certificate,
-no Apple Developer ID, no notarization. The operating system therefore warns
-once, as described below. Only continue for files downloaded from this
-repository's releases.
+The app is not signed with a paid certificate. Windows and macOS show a
+warning the first time you open it. The [installation guide](docs/install.md)
+tells you what to do. It also explains upgrades, uninstalls and the app's
+known limits.
 
-### Windows 10/11 (x64)
+## Find links
 
-1. Download `nswpedia-search-<version>-windows-x64-setup.exe`. Edge or Chrome
-   may say the file *isn't commonly downloaded*; choose **Keep** (in Edge:
-   **...** menu → **Keep** → **Show more** → **Keep anyway**).
-2. Run it. SmartScreen shows **Windows protected your PC** (*Unknown
-   publisher*). Click **More info**, then **Run anyway**.
-3. The installer needs no administrator rights. It installs for the current
-   user into `%LOCALAPPDATA%\Programs\NSWpedia Search`, adds a Start menu
-   shortcut and, optionally, a desktop shortcut. Uninstall from **Settings →
-   Apps → Installed apps** (or Control Panel).
+1. Type a title and press **Enter**.
+2. The app opens the first result. Select a different result to see its files.
+3. Each file gets a ✓ and a link when the link is ready.
+4. Click **copy** for one link, or **copy all** for all ready links.
 
-If **Smart App Control** is on (Windows 11), it blocks unsigned apps and
-offers no **Run anyway** button. The only way around it is turning Smart App
-Control off in **Windows Security → App & browser control**.
+## Download files with Real-Debrid (optional)
 
-Portable alternative: unzip `nswpedia-search-<version>-windows-x64-portable.zip`
-anywhere and run `nswpedia-search.exe` (keep `vcruntime140.dll` next to it).
-SmartScreen may show the same warning. Settings and the token are shared with
-the installed copy.
+With a [Real-Debrid](https://real-debrid.com) premium account, the app can
+download the files for you.
 
-**Upgrade:** run the newer setup. It reuses the existing installation folder
-and shortcut choices and asks to close the app if it is running.
+1. Click **settings** (top right).
+2. Paste your API token from
+   [real-debrid.com/apitoken](https://real-debrid.com/apitoken).
+3. Select a download folder. The default is your Downloads folder.
+4. Click **save**.
+5. Click **download** next to a file, or **download all**.
 
-### macOS 15 or newer
+The app keeps the token in Windows Credential Manager or the macOS Keychain.
+Click **↓** to see the download queue.
 
-Pick the DMG for your Mac (Apple menu → **About This Mac**): **Chip: Apple M...**
-→ `nswpedia-search-<version>-macos-arm64.dmg`; **Processor: Intel** →
-`nswpedia-search-<version>-macos-x64.dmg`.
+## More information
 
-1. Open the DMG and drag **NSWpedia Search** onto **Applications**.
-2. Open the app from Applications. macOS shows **"NSWpedia Search" Not
-   Opened** (*Apple could not verify "NSWpedia Search" is free of malware...*).
-   Click **Done**, not **Move to Trash**.
-3. Open **System Settings → Privacy & Security**, scroll to **Security**,
-   click **Open Anyway** next to *"NSWpedia Search" was blocked...*, enter
-   your password, then click **Open Anyway** again. Later launches open
-   normally.
+- [Install, upgrade and uninstall](docs/install.md)
+- [Build, test and internals](docs/development.md)
+- [CI and releases](docs/releases.md)
 
-Since macOS 15, Control-click → **Open** no longer skips this check; use
-**Open Anyway** as above. The Terminal equivalent removes the download
-quarantine flag: `xattr -dr com.apple.quarantine "/Applications/NSWpedia Search.app"`.
-Files fetched with `gh release download` are normally not quarantined, so the
-prompt usually doesn't appear for them.
-
-**Upgrade:** drag the new version onto Applications and choose **Replace**.
-The **Open Anyway** step is needed once per downloaded version. Each build has
-a new ad-hoc signature, so the first time a new version reads the saved
-Real-Debrid token macOS may ask whether *NSWpedia Search* may use confidential
-information stored in your keychain: enter your login password and click
-**Always Allow**. The token itself is kept.
-
-**Uninstall:** drag the app to the Trash.
-
-### Your data across upgrades and uninstalls
-
-Installing, upgrading and uninstalling only change the app's own files. These
-are kept (delete them by hand for a clean slate):
-
-| | Windows | macOS |
-| --- | --- | --- |
-| Settings (`settings.json`) | `%APPDATA%\NSWpedia\NSWpedia Search\config` | `~/Library/Application Support/com.NSWpedia.NSWpedia-Search` |
-| Search cache | `%LOCALAPPDATA%\NSWpedia\NSWpedia Search\cache` | `~/Library/Caches/com.NSWpedia.NSWpedia-Search` |
-| Real-Debrid token | Credential Manager → Windows Credentials → `real-debrid-api-key.NSWpedia Search` | Keychain Access → login → `NSWpedia Search` |
-| Downloads | your chosen download folder | your chosen download folder |
-
-There is no automatic updater; check the Releases page for new versions.
-
-## Real-Debrid downloads
-
-Open **settings** (top right), paste your private API token from
-https://real-debrid.com/apitoken, optionally press **verify**, and **save**. The
-token is stored in Windows Credential Manager (macOS Keychain on Mac), never in
-files or logs; the input is masked and is cleared when the dialog closes.
-The download folder defaults to your Downloads folder; settings are saved in
-the OS config directory as `settings.json`.
-
-**download** next to a ready link, or **download all**, sends each 1fichier link
-to Real-Debrid (`POST /rest/1.0/unrestrict/link`) and streams the returned file
-to `<download folder>\<result title>\<file name>`. The **↓** button opens the
-queue with progress, speed, cancel, retry, and show-in-folder actions.
-
-- Two downloads run at once; the rest wait in the queue. Re-clicking a link that
-  is queued, running or already saved does nothing; failed or cancelled jobs
-  restart.
-- Folder and file names are sanitized to a single safe path component (no
-  separators, `..`, drive colons, wildcards, reserved device names or trailing
-  dots). Existing files are never replaced: a name such as `Game (1).nsp` is
-  used instead.
-- Data is written to `<file>.<hash>.part` and renamed when complete and the size
-  matches. Failed downloads keep the part file and resume with an HTTP range
-  request on retry, including after a restart; cancelled ones delete it.
-- The token is only sent to `api.real-debrid.com` in the `Authorization` header.
-  Download links must be HTTPS and redirects must stay HTTPS.
-- The queue is in memory: closing the app stops active downloads and clears
-  the list (part files remain and resume when the same link is downloaded
-  again).
-
-## Build
-
-Rust 1.92 or newer (CI and releases use the pinned 1.99.1). Dependencies are
-pinned by Cargo.lock. GPUI Kit 0.7.3 provides GPUI and native input
-components. See https://gpui-kit.com/docs/installation/.
-
-The version in `Cargo.toml` is the single source for the executable metadata,
-installer, app bundle and file names. Allowed forms are `X.Y.Z` and
-`X.Y.Z-rc.N`. Where a platform needs plain numbers, an ordered mapping is used
-(`build.rs`, `scripts/version.sh`, `scripts/Version.ps1`): `0.2.0-rc.1` →
-Windows file version 0.2.0.1, macOS `CFBundleShortVersionString` 0.2.0 and
-`CFBundleVersion` 0.2.1; `0.2.0` → 0.2.0.1000, 0.2.0 and 0.2.1000.
-
-Windows 10/11 x64: install Rust's MSVC toolchain and Visual Studio 2022 Build
-Tools with the C++ desktop workload, Windows SDK and CMake. For the installer
-also install [Inno Setup 6](https://jrsoftware.org/isinfo.php) (or set
-`$env:ISCC` to the path of `ISCC.exe`). Run:
-
-```powershell
-.\scripts\Build-Windows.ps1
-# Optimized build plus dist\nswpedia-search-windows.zip:
-.\scripts\Build-Windows.ps1 -Release
-.\dist\windows\nswpedia-search.exe
-# Package into another folder (e.g. while a copy is running from dist\windows):
-.\scripts\Build-Windows.ps1 -Release -Name windows-test
-# Release assets in dist\release (setup .exe and portable zip):
-.\scripts\Build-Windows.ps1 -Release -Installer
-# Silent install/upgrade/uninstall check (installs into your profile, then removes it):
-.\scripts\Test-WindowsInstaller.ps1 -Setup dist\release\nswpedia-search-<version>-windows-x64-setup.exe -Launch
-```
-
-The script embeds the icon and version resources, checks the executable's
-version against Cargo.toml, and bundles every Visual C++ runtime DLL the
-executable imports (currently only `vcruntime140.dll`); other DLLs are Windows
-system components. The installer is defined in
-`installer/windows/nswpedia-search.iss`; its `AppId` GUID is the upgrade
-identity and must never change.
-
-macOS 15 or newer: install Rust and Xcode (or its command-line tools), then:
-
-```sh
-bash scripts/package-macos.sh          # host CPU
-bash scripts/package-macos.sh x64      # or arm64; other CPU needs: rustup target add x86_64-apple-darwin
-open 'dist/macos-arm64/NSWpedia Search.app'
-```
-
-It writes the app bundle (icon, versioned `Info.plist`, bundle ID
-`com.nswpedia.search`) and `dist/release/nswpedia-search-<version>-macos-<arch>.dmg`,
-ad-hoc signs the app, and verifies the signature, CPU architecture and DMG
-contents.
-
-### Icon
-
-`assets/icon/icon.svg` is the editable source (`icon-small.svg` is used for
-16–32 px, `icon-macos.svg` follows the macOS icon grid). After editing,
-regenerate the committed `.ico`, `.icns` and preview PNG:
-
-```sh
-cargo run --release --manifest-path tools/icon-gen/Cargo.toml -- assets/icon
-```
-
-## CI and releases
-
-Build once, test those exact files, publish the same files.
-
-`.github/workflows/ci.yml` is the single validation run for pull requests and
-`main`. It always checks formatting and runs the resolver tests. When a pull
-request changes packaging inputs (`Cargo.toml`, `build.rs`, `assets/`,
-`installer/`, `scripts/`, `.github/`), the same run builds and tests the
-installers with `.github/workflows/build.yml`; otherwise it runs
-release-profile tests on Windows and Apple Silicon. After a merge, the run on
-`main` is skipped if that exact source tree already passed in this repository.
-
-`build.yml` compiles each platform once (tests reuse the release build).
-Windows builds the installer and runs a silent install → upgrade → uninstall
-test (settings and credential preservation, launching the installed app).
-Both macOS DMGs compile on the Apple Silicon runner (`macos-15`); the arm64
-DMG is installed and launched there, the Intel DMG on a real Intel runner
-(`macos-15-intel`). The tested files are kept for 30 days as the artifact
-`release-assets-<source tree>`, with `SHA256SUMS.txt` and `provenance.txt`
-(version, source tree, commit and run that built them).
-
-To release, follow the checklist in AGENTS.md: bump the version in the pull
-request, merge it, then run the Release workflow on `main`:
-
-```sh
-gh workflow run release.yml --ref main
-```
-
-`.github/workflows/release.yml` refuses if the version is already tagged,
-reuses the tested assets for main's exact source tree (only from successful
-runs of this repository's own workflows, never fork pull requests), or builds
-and tests them once if there are none. It verifies the version, source tree
-and every checksum, then creates the tag `vX.Y.Z` at main's commit and
-publishes those files with notes from `.github/release-notes.md`. A stable
-version becomes the repository's **Latest** release; `-rc` versions are
-**Pre-release** and don't replace Latest. Nothing is tagged or published
-unless every step passes. Only the final job has `contents: write`; actions
-are pinned to commit SHAs; the Rust toolchain and Inno Setup (SHA-256-checked)
-are pinned; caches are only written from `main`. Artifacts contain only the
-built app; no credentials or API keys are involved beyond the workflow's own
-short-lived GitHub token.
-
-## Checks
-
-```sh
-cargo test --locked --no-default-features --lib
-cargo run --locked --no-default-features --bin nswpedia-check -- Celeste
-cargo run -- --search Celeste
-```
-
-The checker uses the same Rust resolver as the GUI. Its optional second argument
-is a SQLite path, useful for measuring a fresh cache. It reports time to the
-first landing link, not download speed. Unit tests cover parser boundaries,
-ad rejection, cache persistence/expiry, concurrent deduplication and cancellation.
-Real-Debrid and download tests run against a local mock HTTP server: request
-shape and bearer header, error-code mapping (token never echoed), HTTPS
-enforcement, safe names, no-overwrite saving, duplicate suppression, resume
-after failure, and cancellation. No account or network is needed.
-
-## Implementation
-
-- Public WordPress search → `/download/{slug}-{id}` → source-listed
-  `download_list_aff` pages → `a#download-link`. No JavaScript/ad scripts run.
-- Three concurrent requests, starts at least 250 ms apart, 60-second cooldown
-  on HTTP 403/429, bounded response sizes and 20-second deadlines.
-- Cache lifetimes: search 15 minutes, file lists 1 hour, landing links 12 hours.
-  Stored in the OS application cache directory, separate from the web cache.
-- Resolve 24 files per batch, stream results immediately, retain resolved links
-  while loading more. Queued work cancels on selection/search changes. Generation
-  IDs reject results from obsolete work; in-flight requests may finish in the
-  background within the timeout.
-- UI work stays on the main thread; HTTP/parsing/cache work uses worker threads.
-  Only NSWpedia source URLs and HTTPS 1fichier landing URLs are accepted.
-- Source-page layout changes surface errors and a retry action. No automated
-  crawl or alternate mirror probing. The only authenticated API is Real-Debrid,
-  used only when you press download or verify.
-
-The interface is a restrained, terminal-inspired dark design: monospace type,
-one muted green accent, and brief fades plus small spinners while work is in
-flight. Nothing animates while the window is idle.
-
-No startup registration is created. Closing the window quits the app.
-
-## Verified on this Windows PC — October 17, 2026
-
-- Debug and optimized builds passed; four resolver unit tests passed.
-- Live lookup: Celeste 1/1, Hollow Knight 3/3, No Man’s Sky 2/2 landing links.
-  Cold first-link times were 1.27 s, 1.44 s and 1.20 s respectively. Cached
-  Celeste completed in 1 ms. Single-run backend observations, not guarantees.
-- Native window rendered and Copy placed the exact expected URL on the clipboard.
-  Packaged release loaded Hollow Knight with three ready Copy controls and Copy
-  all. It was responsive, used about 75 MB RAM, opened no listening TCP ports,
-  and produced no startup stderr. The user subsequently accepted the desktop replacement.
-- Windows output: approximately 31 MB executable, 12 MB zipped with its runtime.
-- macOS has not been built or tested here. The old web portal is stopped.
-
-Evidence is in `reports/`. The temporary relay VM was deleted. A recovery archive
-of the retired web project is kept at
-`C:\Users\Neil\projects\pc-manager\archives\nsw-portal-retired-2026-10-17.zip`.
+The license is MIT, as [Cargo.toml](Cargo.toml) declares.
