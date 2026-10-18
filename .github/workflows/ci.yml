@@ -1,7 +1,18 @@
+# The single validation workflow.
+#
+# Pull requests: formatting and tests. When packaging inputs change (version,
+# build/installer scripts, icons, workflows), the same run also builds and
+# tests the installers (build.yml) instead of the plain test jobs. Assets are
+# kept, with checksums and provenance, for release.yml to publish unchanged.
+#
+# Pushes to main: skipped when this exact source tree already passed
+# validation in this repository (a pull request merged without other changes
+# in between); otherwise the same checks run.
 name: CI
 on:
+  pull_request:
   push:
-    branches: ["**"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,8 +22,129 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.99.1"
+
 jobs:
-  build:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tree: ${{ steps.plan.outputs.tree }}
+      skip: ${{ steps.plan.outputs.skip }}
+      package: ${{ steps.plan.outputs.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          skip=false
+          if [[ $GITHUB_EVENT_NAME == push ]] &&
+            bash scripts/find-validated.sh validated "$tree" > /dev/null; then
+            skip=true
+          fi
+          # Package when packaging inputs changed (or the base is unknown, e.g.
+          # a manual run). Otherwise tests only.
+          package=true
+          if [[ $BASE =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BASE" HEAD |
+              grep -qE '^(Cargo\.toml|build\.rs|assets/|installer/|scripts/|\.github/)' || package=false
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "tree $tree, skip=$skip, package=$package"
+
+  checks:
+    name: Format and resolver tests
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
+          rustup default "$RUST_TOOLCHAIN"
+      - run: cargo fmt --all --check
+      - run: cargo fmt --check --manifest-path tools/icon-gen/Cargo.toml
+      - run: bash scripts/version.sh
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The resolver library builds without the GUI stack.
+      - run: cargo test --locked --no-default-features --lib
+
+  test:
+    name: Tests (${{ matrix.name }})
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.package != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-2025
+            cache: windows-x64
+            args: ""
+          - name: macOS
+            runner: macos-15
+            cache: macos-arm64
+            args: --target aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust ${{ env.RUST_TOOLCHAIN }}
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      # Same key, profile and target as the packaging build.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: release-${{ matrix.cache }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --locked --release ${{ matrix.args }}
+
+  package:
+    name: Package
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.package == 'true'
     uses: ./.github/workflows/build.yml
-    with:
-      release: false
+
+  # Marker that this source tree passed every check. Lets the post-merge push
+  # to main skip an identical rerun (scripts/find-validated.sh).
+  validated:
+    name: Validated
+    needs: [plan, checks, test, package]
+    if: >-
+      always() && needs.plan.outputs.skip != 'true' &&
+      needs.checks.result == 'success' &&
+      (needs.test.result == 'success' || needs.package.result == 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          TREE: ${{ needs.plan.outputs.tree }}
+          PACKAGED: ${{ needs.plan.outputs.package }}
+        run: |
+          printf 'TREE=%s\nCOMMIT=%s\nRUN_ID=%s\nPACKAGED=%s\n' \
+            "$TREE" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$PACKAGED" | tee validated.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: validated-${{ needs.plan.outputs.tree }}
+          path: validated.txt
+          retention-days: 30

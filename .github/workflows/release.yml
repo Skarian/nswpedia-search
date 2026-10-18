@@ -1,100 +1,136 @@
-# Push a tag matching Cargo.toml (e.g. v0.1.1) to build and test every platform
-# and, only if everything passes, publish a GitHub Release with the installers.
-# X.Y.Z tags become the Latest release; X.Y.Z-rc.N tags are prereleases.
+# Publishes the version in Cargo.toml from main: Actions → Release → Run workflow
+# (or `gh workflow run release.yml --ref main`).
+#
+# Validate first, tag last: the release reuses the installers that CI already
+# built and tested for main's exact source tree (release-assets-<tree> from a
+# successful same-repository run). If none exist, it builds and tests them once
+# here. The bundle's checksums, version and source tree are verified, then the
+# tag vX.Y.Z is created at main's commit and the same files are published, so
+# a tag only ever exists for a published release. X.Y.Z becomes Latest;
+# X.Y.Z-rc.N is published as a prerelease.
 name: Release
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  verify:
-    name: Tag matches Cargo.toml
+  prepare:
+    name: Version and tested assets
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      actions: read
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      tree: ${{ steps.plan.outputs.tree }}
+      assets-run: ${{ steps.plan.outputs.assets-run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: version
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          [[ $GITHUB_REF == refs/heads/main ]] || { echo "::error::Run this on main"; exit 1; }
           eval "$(bash scripts/version.sh)"
-          if [[ "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $VERSION (expected v$VERSION)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::v$VERSION is already tagged (released). Bump the version in Cargo.toml."
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          tree=$(git rev-parse 'HEAD^{tree}')
+          run=$(bash scripts/find-validated.sh release-assets "$tree" || true)
+          if [[ -n $run ]]; then
+            echo "Reusing tested assets from run $run (tree $tree)"
+          else
+            echo "No tested assets for tree $tree; building them in this run"
+          fi
+          {
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "tree=$tree"
+            echo "assets-run=$run"
+          } >> "$GITHUB_OUTPUT"
 
   build:
-    needs: verify
+    needs: prepare
+    if: needs.prepare.outputs.assets-run == ''
     permissions:
       contents: read
     uses: ./.github/workflows/build.yml
-    with:
-      release: true
 
   publish:
     name: Publish GitHub Release
-    needs: [verify, build]
+    needs: [prepare, build]
+    if: >-
+      always() && needs.prepare.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     env:
-      VERSION: ${{ needs.verify.outputs.version }}
-      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      TREE: ${{ needs.prepare.outputs.tree }}
+      ASSETS_RUN: ${{ needs.prepare.outputs.assets-run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Download assets tested in CI
+        if: env.ASSETS_RUN != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: release-*
+          name: release-assets-${{ env.TREE }}
           # Not "assets": that is the repo's icon folder in the checkout.
           path: release-assets
-          merge-multiple: true
-      - name: Check assets and write checksums
-        working-directory: release-assets
+          run-id: ${{ env.ASSETS_RUN }}
+          github-token: ${{ github.token }}
+      - name: Download assets built in this run
+        if: env.ASSETS_RUN == ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets-${{ env.TREE }}
+          path: release-assets
+      - name: Check assets
         run: |
-          expected=(
-            "nswpedia-search-$VERSION-windows-x64-setup.exe"
-            "nswpedia-search-$VERSION-windows-x64-portable.zip"
-            "nswpedia-search-$VERSION-macos-arm64.dmg"
-            "nswpedia-search-$VERSION-macos-x64.dmg"
-          )
-          ls -la
-          for f in "${expected[@]}"; do
-            [[ -s $f ]] || { echo "::error::Missing $f"; exit 1; }
-          done
-          [[ $(ls | wc -l) -eq ${#expected[@]} ]] || { echo "::error::Unexpected files in artifacts"; exit 1; }
-          sha256sum "${expected[@]}" > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          [[ $(git rev-parse 'HEAD^{tree}') == "$TREE" ]] || { echo "::error::main changed during the release"; exit 1; }
+          bash scripts/bundle-assets.sh verify release-assets "$VERSION" "$TREE"
       - name: Release notes
         run: |
+          built=$(sed -n 's/^COMMIT=//p' release-assets/provenance.txt)
+          run=$(sed -n 's/^RUN_ID=//p' release-assets/provenance.txt)
           {
             sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md
             echo
             echo '```text'
             cat release-assets/SHA256SUMS.txt
             echo '```'
+            echo
+            echo "Built and tested in [workflow run $run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run)"
+            if [[ $built == "$GITHUB_SHA" ]]; then
+              echo "from commit $GITHUB_SHA."
+            else
+              echo "from commit $built (the pull request's merge preview). This release is tagged at"
+              echo "$GITHUB_SHA, which has the identical source tree $TREE."
+            fi
           } > "$RUNNER_TEMP/notes.md"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          tag="$GITHUB_REF_NAME"
-          # Stable versions become the repository's Latest release; -rc tags are
-          # prereleases and leave Latest unchanged.
+          tag="v$VERSION"
+          assets=(release-assets/nswpedia-search-* release-assets/SHA256SUMS.txt)
+          # Stable versions become the repository's Latest release; -rc versions
+          # are prereleases and leave Latest unchanged.
           if [[ $PRERELEASE == true ]]; then
             flags=(--prerelease --latest=false)
           else
@@ -103,11 +139,12 @@ jobs:
           if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
             # Left over from an interrupted run: refresh it. Never touch a published release.
             [[ $draft == true ]] || { echo "::error::$tag is already published"; exit 1; }
-            gh release upload "$tag" release-assets/* --clobber
-            gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$tag" "${assets[@]}" --clobber
+            gh release edit "$tag" --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            # Upload everything to a draft first so the release never appears half-filled.
-            gh release create "$tag" release-assets/* --draft --verify-tag \
+            # Upload everything to a draft first so the release never appears
+            # half-filled. Drafts don't create the tag; publishing does.
+            gh release create "$tag" "${assets[@]}" --draft --target "$GITHUB_SHA" \
               --title "NSWpedia Search $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$tag" --draft=false "${flags[@]}"

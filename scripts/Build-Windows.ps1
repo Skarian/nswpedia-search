@@ -13,7 +13,11 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer
 if (-not (Test-Path $vswhere)) { throw 'Install Visual Studio Build Tools with the Desktop development with C++ workload.' }
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw 'The Visual C++ workload is missing.' }
-& (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+# No developer shell: cargo finds MSVC itself, and building in the same
+# environment as a plain `cargo test --release` reuses its compiled crates.
+$dumpbin = Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') |
+    Sort-Object FullName -Descending | Select-Object -First 1
+if (-not $dumpbin) { throw 'dumpbin.exe was not found in the Visual C++ tools.' }
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 $env:PATH = "$cargoBin;$env:PATH"
 $meta = & (Join-Path $PSScriptRoot 'Version.ps1')
@@ -40,7 +44,7 @@ try {
     $crt = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT') -Directory |
         Sort-Object FullName -Descending | Select-Object -First 1
     if (-not $crt) { throw 'Microsoft redistributable runtime was not found.' }
-    $imports = & dumpbin /nologo /dependents $exe | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -match '\.dll$' }
+    $imports = & $dumpbin.FullName /nologo /dependents $exe | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -match '\.dll$' }
     $runtime = @($imports | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib)' })
     if ($runtime.Count -eq 0) { throw 'Expected the executable to import the Visual C++ runtime.' }
     foreach ($dll in $runtime) {

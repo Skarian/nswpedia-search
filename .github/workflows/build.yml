@@ -1,13 +1,18 @@
-# Reusable build: checks, tests and packaged installers for every platform.
-# Called by ci.yml (every branch push) and release.yml (version tags).
+# Builds, tests and packages the installers for every platform, then bundles
+# the exact tested files with SHA256SUMS.txt and provenance.json as the
+# artifact release-assets-<source tree>, which release.yml publishes unchanged.
+# Called by ci.yml (pull requests that change packaging inputs) and by
+# release.yml when no tested assets exist for the release commit's tree. Can
+# also be run by hand (Actions → Build → Run workflow).
+#
+# Speed: each platform compiles once, in the release profile (tests reuse the
+# same build), and restores the dependency cache that CI saves on main. Both
+# macOS architectures compile on the fast Apple Silicon runner; the Intel
+# runner only installs and launches the finished Intel DMG.
 name: Build
 on:
   workflow_call:
-    inputs:
-      release:
-        description: Release build (no dependency cache, longer artifact retention)
-        type: boolean
-        default: false
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,22 +24,6 @@ env:
   INNO_SETUP_SHA256: 9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732
 
 jobs:
-  checks:
-    name: Format and version
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Rust ${{ env.RUST_TOOLCHAIN }}
-        run: |
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
-          rustup default "$RUST_TOOLCHAIN"
-      - run: cargo fmt --all --check
-      - run: cargo fmt --check --manifest-path tools/icon-gen/Cargo.toml
-      - name: Version metadata
-        run: bash scripts/version.sh
-
   windows:
     name: Windows x64
     runs-on: windows-2025
@@ -47,11 +36,9 @@ jobs:
           rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
           rustup default $env:RUST_TOOLCHAIN
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: ${{ !inputs.release }}
-      - name: Resolver tests
-        run: cargo test --locked --no-default-features --lib
-      - name: Desktop state tests
-        run: cargo test --locked --bin nswpedia-search
+        with:
+          shared-key: release-windows-x64
+          save-if: false
       - name: Inno Setup (pinned, hash-verified)
         run: |
           $setup = Join-Path $env:RUNNER_TEMP 'innosetup.exe'
@@ -62,6 +49,8 @@ jobs:
           $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOICONS',"/DIR=$dir" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Inno Setup install failed: $($p.ExitCode)" }
           "ISCC=$dir\ISCC.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Tests
+        run: cargo test --locked --release
       - name: Build executable, installer and portable zip
         run: ./scripts/Build-Windows.ps1 -Release -Installer
       - name: Install, upgrade and uninstall test
@@ -77,58 +66,80 @@ jobs:
           name: release-windows-x64
           path: dist/release/*
           if-no-files-found: error
-          retention-days: ${{ inputs.release && 30 || 14 }}
+          retention-days: 14
 
   macos:
-    name: macOS ${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15 # Apple Silicon
-            arch: arm64
-          - runner: macos-15-intel # Intel
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    name: macOS (arm64 + x64 builds)
+    runs-on: macos-15 # Apple Silicon
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Rust ${{ env.RUST_TOOLCHAIN }}
         run: |
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target x86_64-apple-darwin
           rustup default "$RUST_TOOLCHAIN"
           echo "Runner CPU: $(uname -m), macOS $(sw_vers -productVersion)"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: ${{ !inputs.release }}
-      - name: Resolver tests
-        run: cargo test --locked --no-default-features --lib
-      - name: Desktop state tests
-        run: cargo test --locked --bin nswpedia-search
-      - name: Build app bundle and DMG
-        run: bash scripts/package-macos.sh ${{ matrix.arch }}
-      - name: Install from DMG and launch
-        run: |
-          eval "$(bash scripts/version.sh)"
-          dmg="dist/release/nswpedia-search-$VERSION-macos-${{ matrix.arch }}.dmg"
-          mnt=$(mktemp -d)
-          apps=$(mktemp -d)
-          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mnt"
-          ditto "$mnt/NSWpedia Search.app" "$apps/NSWpedia Search.app"
-          hdiutil detach "$mnt"
-          app="$apps/NSWpedia Search.app"
-          codesign --verify --strict --verbose=2 "$app"
-          # Expected to be rejected: ad-hoc signed and not notarized.
-          spctl --assess --type execute --verbose=2 "$app" || true
-          "$app/Contents/MacOS/nswpedia-search" &
-          pid=$!
-          sleep 10
-          kill -0 "$pid" || { echo "App exited during startup"; exit 1; }
-          kill "$pid"
-          echo "App started and stayed running"
+        with:
+          shared-key: release-macos-arm64
+          save-if: false
+      - name: Tests
+        run: cargo test --locked --release --target aarch64-apple-darwin
+      - name: Apple Silicon app and DMG
+        run: bash scripts/package-macos.sh arm64
+      - name: Intel app and DMG
+        run: bash scripts/package-macos.sh x64
+      - name: Install Apple Silicon DMG and launch
+        run: bash scripts/smoke-macos.sh arm64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-macos-${{ matrix.arch }}
+          name: release-macos
           path: dist/release/*.dmg
           if-no-files-found: error
-          retention-days: ${{ inputs.release && 30 || 14 }}
+          retention-days: 14
+
+  macos-intel:
+    name: macOS Intel install and launch
+    needs: macos
+    runs-on: macos-15-intel # Intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-macos
+          path: dist/release
+      - name: Install Intel DMG and launch
+        run: |
+          echo "Runner CPU: $(uname -m), macOS $(sw_vers -productVersion)"
+          bash scripts/smoke-macos.sh x64
+
+  bundle:
+    name: Bundle tested assets
+    needs: [windows, macos, macos-intel]
+    runs-on: ubuntu-24.04
+    outputs:
+      tree: ${{ steps.bundle.outputs.tree }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - id: bundle
+        run: |
+          eval "$(bash scripts/version.sh)"
+          tree=$(git rev-parse 'HEAD^{tree}')
+          bash scripts/bundle-assets.sh create release-assets "$VERSION" "$tree" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets-${{ steps.bundle.outputs.tree }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
