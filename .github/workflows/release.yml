@@ -59,10 +59,11 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-*
-          path: assets
+          # Not "assets": that is the repo's icon folder in the checkout.
+          path: release-assets
           merge-multiple: true
       - name: Check assets and write checksums
-        working-directory: assets
+        working-directory: release-assets
         run: |
           expected=(
             "nswpedia-search-$VERSION-windows-x64-setup.exe"
@@ -83,7 +84,7 @@ jobs:
             sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md
             echo
             echo '```text'
-            cat assets/SHA256SUMS.txt
+            cat release-assets/SHA256SUMS.txt
             echo '```'
           } > "$RUNNER_TEMP/notes.md"
       - name: Publish release
@@ -102,11 +103,11 @@ jobs:
           if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
             # Left over from an interrupted run: refresh it. Never touch a published release.
             [[ $draft == true ]] || { echo "::error::$tag is already published"; exit 1; }
-            gh release upload "$tag" assets/* --clobber
+            gh release upload "$tag" release-assets/* --clobber
             gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md"
           else
             # Upload everything to a draft first so the release never appears half-filled.
-            gh release create "$tag" assets/* --draft --verify-tag \
+            gh release create "$tag" release-assets/* --draft --verify-tag \
               --title "NSWpedia Search $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$tag" --draft=false "${flags[@]}"
