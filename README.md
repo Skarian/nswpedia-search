@@ -193,7 +193,9 @@ app), and DMGs for Apple Silicon (`macos-15`) and Intel (`macos-15-intel`)
 runners that are installed from the image and launched. Packages are kept as
 workflow artifacts for 14 days.
 
-To release, set the version in Cargo.toml, commit, and push a matching tag:
+To release, follow the checklist in AGENTS.md (including the one-minute
+publish dry run, `bash scripts/test-release-publish.sh`), then push a tag
+matching the version in Cargo.toml:
 
 ```sh
 git tag v0.1.1
