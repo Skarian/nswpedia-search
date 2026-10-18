@@ -31,6 +31,10 @@ keyring = { version = "3", optional = true, features = ["windows-native"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", optional = true, features = ["apple-native"] }
 
+[build-dependencies]
+# Windows icon and version resources (no-op on other targets).
+embed-resource = "3"
+
 [dev-dependencies]
 tempfile = "3"
 

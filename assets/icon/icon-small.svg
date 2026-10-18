@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Simplified artwork for 16-32 px: no prompt glyph, heavier strokes. -->
+  <rect x="32" y="32" width="960" height="960" rx="176" fill="#131417" stroke="#30343a" stroke-width="24"/>
+  <g fill="none" stroke="#8fcf9f" stroke-linecap="round">
+    <circle cx="440" cy="440" r="220" stroke-width="112"/>
+    <line x1="620" y1="620" x2="810" y2="810" stroke-width="136"/>
+  </g>
+</svg>

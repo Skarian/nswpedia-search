@@ -1,26 +1,134 @@
-name: Native builds
-on: [push, pull_request, workflow_dispatch]
+# Reusable build: checks, tests and packaged installers for every platform.
+# Called by ci.yml (every branch push) and release.yml (version tags).
+name: Build
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Release build (no dependency cache, longer artifact retention)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.99.1"
+  INNO_SETUP_URL: https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+  INNO_SETUP_SHA256: 9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [windows-latest, macos-15]
-    runs-on: ${{ matrix.os }}
+  checks:
+    name: Format and version
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
+          rustup default "$RUST_TOOLCHAIN"
+      - run: cargo fmt --all --check
+      - run: cargo fmt --check --manifest-path tools/icon-gen/Cargo.toml
+      - name: Version metadata
+        run: bash scripts/version.sh
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
+          rustup default $env:RUST_TOOLCHAIN
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ !inputs.release }}
       - name: Resolver tests
         run: cargo test --locked --no-default-features --lib
       - name: Desktop state tests
         run: cargo test --locked --bin nswpedia-search
-      - name: Windows executable
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./scripts/Build-Windows.ps1 -Release
-      - name: macOS app bundle
-        if: runner.os == 'macOS'
-        run: bash scripts/package-macos.sh
-      - uses: actions/upload-artifact@v4
+      - name: Inno Setup (pinned, hash-verified)
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup.exe'
+          Invoke-WebRequest -Uri $env:INNO_SETUP_URL -OutFile $setup
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
+          if ($hash -ne $env:INNO_SETUP_SHA256) { throw "Inno Setup hash mismatch: $hash" }
+          $dir = Join-Path $env:RUNNER_TEMP 'innosetup'
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOICONS',"/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Inno Setup install failed: $($p.ExitCode)" }
+          "ISCC=$dir\ISCC.exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build executable, installer and portable zip
+        run: ./scripts/Build-Windows.ps1 -Release -Installer
+      - name: Install, upgrade and uninstall test
+        run: |
+          $meta = ./scripts/Version.ps1
+          $old = Join-Path $env:RUNNER_TEMP 'old'
+          # Same payload labelled as an older release, to exercise the upgrade path.
+          & $env:ISCC /Q /DAppVersion=0.0.1 /DAppNumericVersion=0.0.1.1000 "/DSourceDir=$PWD\dist\windows" "/DOutputDir=$old" /DOutputName=old-setup installer\windows\nswpedia-search.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the older installer.' }
+          ./scripts/Test-WindowsInstaller.ps1 -Setup "dist\release\nswpedia-search-$($meta.Version)-windows-x64-setup.exe" -PreviousSetup "$old\old-setup.exe" -SeedCredential -Launch
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: nswpedia-${{ matrix.os }}
-          path: dist/
+          name: release-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: ${{ inputs.release && 30 || 14 }}
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15 # Apple Silicon
+            arch: arm64
+          - runner: macos-15-intel # Intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust ${{ env.RUST_TOOLCHAIN }}
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          echo "Runner CPU: $(uname -m), macOS $(sw_vers -productVersion)"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: ${{ !inputs.release }}
+      - name: Resolver tests
+        run: cargo test --locked --no-default-features --lib
+      - name: Desktop state tests
+        run: cargo test --locked --bin nswpedia-search
+      - name: Build app bundle and DMG
+        run: bash scripts/package-macos.sh ${{ matrix.arch }}
+      - name: Install from DMG and launch
+        run: |
+          eval "$(bash scripts/version.sh)"
+          dmg="dist/release/nswpedia-search-$VERSION-macos-${{ matrix.arch }}.dmg"
+          mnt=$(mktemp -d)
+          apps=$(mktemp -d)
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mnt"
+          ditto "$mnt/NSWpedia Search.app" "$apps/NSWpedia Search.app"
+          hdiutil detach "$mnt"
+          app="$apps/NSWpedia Search.app"
+          codesign --verify --strict --verbose=2 "$app"
+          # Expected to be rejected: ad-hoc signed and not notarized.
+          spctl --assess --type execute --verbose=2 "$app" || true
+          "$app/Contents/MacOS/nswpedia-search" &
+          pid=$!
+          sleep 10
+          kill -0 "$pid" || { echo "App exited during startup"; exit 1; }
+          kill "$pid"
+          echo "App started and stayed running"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: dist/release/*.dmg
+          if-no-files-found: error
+          retention-days: ${{ inputs.release && 30 || 14 }}

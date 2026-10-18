@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- NSWpedia Search app icon (Windows, Linux, previews). Edit this file, then
+       run tools/icon-gen to regenerate the .ico/.icns. Colors match src/style.rs. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1c20"/>
+      <stop offset="1" stop-color="#0e0f11"/>
+    </linearGradient>
+  </defs>
+  <rect x="68" y="68" width="888" height="888" rx="200" fill="url(#body)" stroke="#30343a" stroke-width="8"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- magnifier -->
+    <circle cx="452" cy="452" r="196" stroke="#8fcf9f" stroke-width="60"/>
+    <line x1="604" y1="604" x2="756" y2="756" stroke="#8fcf9f" stroke-width="84"/>
+    <!-- terminal prompt inside the lens -->
+    <polyline points="378,396 434,452 378,508" stroke="#d6d8dc" stroke-width="36"/>
+    <line x1="470" y1="508" x2="530" y2="508" stroke="#8fcf9f" stroke-width="36"/>
+  </g>
+</svg>

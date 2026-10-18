@@ -4029,6 +4029,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "directories",
+ "embed-resource",
  "gpui-kit",
  "html-escape",
  "keyring",
