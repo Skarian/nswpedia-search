@@ -1,4 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod dialogs;
+mod secrets;
 mod style;
 mod view;
 
@@ -7,10 +9,13 @@ use gpui_kit::component::{
     input::{InputEvent, InputState},
 };
 use gpui_kit::*;
-use nswpedia_search::resolver::{
-    BATCH_SIZE, Cancel, FileEntry, Game, ResolveEvent, Resolver, SearchPage,
+use nswpedia_search::{
+    debrid::{Account, valid_token},
+    downloads::{Downloads, Request},
+    resolver::{BATCH_SIZE, Cancel, FileEntry, Game, ResolveEvent, Resolver, SearchPage},
+    settings::Settings,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use style::{ACCENT, BG, DIM, LINE, LINE_HI, PANEL, TEXT, c, ca};
 
 gpui_kit::actions!(search_app, [FocusSearch, Quit]);
@@ -19,6 +24,20 @@ enum Message {
     Search(u64, Result<SearchPage, String>),
     Resolve(u64, ResolveEvent),
     Failed(u64, String),
+    Verified(u64, Result<Account, String>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Modal {
+    Settings,
+    Queue,
+}
+
+/// Values loaded before the window opens.
+struct Startup {
+    settings: Settings,
+    settings_path: PathBuf,
+    token_error: Option<String>,
 }
 struct FileRow {
     file: FileEntry,
@@ -69,7 +88,7 @@ struct SearchApp {
     input: Entity<InputState>,
     resolver: Arc<Resolver>,
     sender: async_channel::Sender<Message>,
-    _events: Task<()>,
+    _events: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
     search_cancel: Cancel,
     resolve_cancel: Cancel,
@@ -90,6 +109,20 @@ struct SearchApp {
     resolve_error: Option<String>,
     copied: Option<String>,
     copy_seq: u64,
+    downloads: Arc<Downloads>,
+    settings: Settings,
+    settings_path: PathBuf,
+    modal: Option<Modal>,
+    modal_focus: FocusHandle,
+    key_input: Entity<InputState>,
+    dir_input: Entity<InputState>,
+    settings_error: Option<String>,
+    settings_note: Option<String>,
+    verify_busy: bool,
+    verify_id: u64,
+    /// Footer message about the last download action: (text, is_error).
+    note: Option<(String, bool)>,
+    note_seq: u64,
 }
 impl Drop for SearchApp {
     fn drop(&mut self) {
@@ -101,16 +134,43 @@ impl SearchApp {
     fn new(
         resolver: Arc<Resolver>,
         initial: Option<String>,
+        downloads: Arc<Downloads>,
+        changes: async_channel::Receiver<()>,
+        startup: Startup,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("type a game title…"));
         let subscription = cx.subscribe_in(&input, window, |this, _, event, _, cx| {
-            if matches!(event, InputEvent::PressEnter { .. }) {
+            if matches!(event, InputEvent::PressEnter { .. }) && this.modal.is_none() {
                 this.search(false, cx);
             }
         });
+        let key_input = cx.new(|cx| InputState::new(window, cx).masked(true));
+        let dir_input = cx.new(|cx| InputState::new(window, cx));
+        let save_on_enter = |this: &mut Self,
+                             _: &Entity<InputState>,
+                             event: &InputEvent,
+                             window: &mut Window,
+                             cx: &mut Context<Self>| {
+            if matches!(event, InputEvent::PressEnter { .. }) {
+                this.save_settings(window, cx);
+            }
+        };
+        let subscriptions = vec![
+            subscription,
+            cx.subscribe_in(&key_input, window, save_on_enter),
+            cx.subscribe_in(&dir_input, window, save_on_enter),
+        ];
         input.update(cx, |input, cx| input.focus(window, cx));
+        // Download workers signal changes; coalesced to one pending re-render.
+        let progress = cx.spawn(async move |this, cx| {
+            while changes.recv().await.is_ok() {
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        });
         let (sender, receiver) = async_channel::bounded(96);
         let events = cx.spawn(async move |this, cx| {
             while let Ok(message) = receiver.recv().await {
@@ -126,8 +186,8 @@ impl SearchApp {
             input,
             resolver,
             sender,
-            _events: events,
-            _subscriptions: vec![subscription],
+            _events: vec![events, progress],
+            _subscriptions: subscriptions,
             search_cancel: Cancel::default(),
             resolve_cancel: Cancel::default(),
             search_id: 0,
@@ -147,6 +207,19 @@ impl SearchApp {
             resolve_error: None,
             copied: None,
             copy_seq: 0,
+            downloads,
+            settings: startup.settings,
+            settings_path: startup.settings_path,
+            modal: None,
+            modal_focus: cx.focus_handle(),
+            key_input,
+            dir_input,
+            settings_error: None,
+            settings_note: None,
+            verify_busy: false,
+            verify_id: 0,
+            note: startup.token_error.map(|error| (error, true)),
+            note_seq: 0,
         };
         if let Some(initial) = initial {
             this.input
@@ -307,6 +380,26 @@ impl SearchApp {
                 self.resolve_busy = false;
                 self.resolve_error = Some(error);
             }
+            Message::Verified(id, result) if id == self.verify_id => {
+                self.verify_busy = false;
+                match result {
+                    Ok(account) if account.premium => {
+                        self.settings_note = Some(format!(
+                            "key works · {} · premium, {} day{} left",
+                            account.username,
+                            account.premium_days,
+                            if account.premium_days == 1 { "" } else { "s" }
+                        ));
+                    }
+                    Ok(account) => {
+                        self.settings_error = Some(format!(
+                            "Key works for {}, but the account is not premium; downloads need premium.",
+                            account.username
+                        ));
+                    }
+                    Err(error) => self.settings_error = Some(error),
+                }
+            }
             _ => return,
         }
         cx.notify();
@@ -324,13 +417,75 @@ impl SearchApp {
         cx.write_to_clipboard(ClipboardItem::new_string(urls.join("\n")));
         self.copied = Some(key.unwrap_or("all").to_string());
         self.copy_seq += 1;
+        self.note = None;
         cx.notify();
+    }
+    fn set_note(&mut self, text: impl Into<String>, error: bool, cx: &mut Context<Self>) {
+        self.note = Some((text.into(), error));
+        self.note_seq += 1;
+        self.copied = None;
+        cx.notify();
+    }
+    /// Queues one ready link (`key`) or all ready links of the selected title.
+    fn download(&mut self, key: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game) = self.selected.and_then(|i| self.games.get(i)) else {
+            return;
+        };
+        if !self.downloads.has_token() {
+            self.open_settings(window, cx);
+            self.settings_error = Some("Add your Real-Debrid API key to download.".into());
+            return;
+        }
+        let requests: Vec<_> = self
+            .files
+            .iter()
+            .filter(|r| key.is_none_or(|k| k == r.file.key))
+            .filter_map(|r| {
+                Some(Request {
+                    title: game.title.clone(),
+                    name: r.file.name.clone(),
+                    link: r.url.clone()?,
+                })
+            })
+            .collect();
+        if requests.is_empty() {
+            return;
+        }
+        match self
+            .downloads
+            .enqueue(&self.settings.download_dir(), requests)
+        {
+            Ok(0) => self.set_note("already queued or saved", false, cx),
+            Ok(n) => self.set_note(
+                format!("queued {n} download{}", if n == 1 { "" } else { "s" }),
+                false,
+                cx,
+            ),
+            Err(error) => self.set_note(error.to_string(), true, cx),
+        }
     }
 }
 fn main() -> anyhow::Result<()> {
     let dirs = directories::ProjectDirs::from("com", "NSWpedia", "NSWpedia Search")
         .ok_or_else(|| anyhow::anyhow!("No application cache directory"))?;
     let resolver = Arc::new(Resolver::new(&dirs.cache_dir().join("cache.sqlite"))?);
+    let settings_path = dirs.config_dir().join("settings.json");
+    let (changed, changes) = async_channel::bounded(1);
+    let downloads = Arc::new(Downloads::new(move || {
+        let _ = changed.try_send(());
+    })?);
+    let token_error = match secrets::load() {
+        Ok(token) => {
+            downloads.set_token(token.filter(|t| valid_token(t)));
+            None
+        }
+        Err(error) => Some(error.to_string()),
+    };
+    let startup = Startup {
+        settings: Settings::load(&settings_path),
+        settings_path,
+        token_error,
+    };
     let args: Vec<_> = std::env::args().collect();
     let initial = args
         .iter()
@@ -388,7 +543,7 @@ fn main() -> anyhow::Result<()> {
         };
         open_window(options, cx, |window, cx| {
             window.set_window_title("NSWpedia Search");
-            cx.new(|cx| SearchApp::new(resolver, initial, window, cx))
+            cx.new(|cx| SearchApp::new(resolver, initial, downloads, changes, startup, window, cx))
         })
         .expect("Could not open NSWpedia Search");
         cx.activate(true);

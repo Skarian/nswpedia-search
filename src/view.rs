@@ -7,15 +7,36 @@ use gpui_kit::component::{
     input::Input,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
-use nswpedia_search::resolver::BATCH_SIZE;
-use std::time::Duration;
+use nswpedia_search::{
+    downloads::{Job, Status},
+    resolver::BATCH_SIZE,
+};
+use std::{collections::HashMap, time::Duration};
 
 impl SearchApp {
     fn ready(&self) -> usize {
         self.files.iter().filter(|r| r.url.is_some()).count()
     }
 
-    fn render_header(&self) -> impl IntoElement {
+    fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let jobs = self.downloads.jobs();
+        let active = jobs.iter().filter(|j| j.status.is_active()).count();
+        let failed = jobs
+            .iter()
+            .filter(|j| matches!(j.status, Status::Failed(_)))
+            .count();
+        let (queue_label, queue_hex) = if active > 0 {
+            (format!("↓ {active}"), ACCENT)
+        } else if failed > 0 {
+            (format!("↓ {failed} !"), WARN)
+        } else {
+            ("↓".to_string(), DIM)
+        };
+        let queue_name = match (active, failed) {
+            (0, 0) => "Downloads".to_string(),
+            (0, failed) => format!("Downloads, {failed} failed"),
+            (active, _) => format!("Downloads, {active} active"),
+        };
         let busy = self.search_busy || self.resolve_busy;
         let status = if self.search_busy {
             working("searching")
@@ -52,6 +73,26 @@ impl SearchApp {
                     .text_xs()
                     .text_color(if busy { c(DIM) } else { c(FAINT) })
                     .child(status),
+            )
+            .child(
+                Button::new("open-queue")
+                    .custom(ghost_button(cx, queue_hex))
+                    .small()
+                    .ml_3()
+                    .cursor_pointer()
+                    .accessibility_label(queue_name)
+                    .tooltip("Downloads")
+                    .label(queue_label)
+                    .on_click(cx.listener(|this, _, window, cx| this.open_queue(window, cx))),
+            )
+            .child(
+                Button::new("open-settings")
+                    .custom(ghost_button(cx, DIM))
+                    .small()
+                    .cursor_pointer()
+                    .accessibility_label("Settings")
+                    .label("settings")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx))),
             )
     }
 
@@ -324,7 +365,21 @@ impl SearchApp {
                     )
                     .child(div().flex_1())
                     .when(ready > 1, |el| {
-                        el.child(self.copy_button(
+                        el.child(
+                            Button::new("download-all")
+                                .custom(ghost_button(cx, DIM))
+                                .small()
+                                .flex_shrink_0()
+                                .border_1()
+                                .border_color(c(LINE_HI))
+                                .cursor_pointer()
+                                .accessibility_label(format!("Download all {ready} ready files"))
+                                .label("download all")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.download(None, window, cx)
+                                })),
+                        )
+                        .child(self.copy_button(
                             "copy-all",
                             None,
                             "copy all",
@@ -347,6 +402,14 @@ impl SearchApp {
                 list = list.child(div().py_4().child(note("no 1fichier links listed")));
             }
         }
+        let root = self.settings.download_dir();
+        let jobs: HashMap<String, Job> = self
+            .downloads
+            .jobs()
+            .into_iter()
+            .filter(|job| job.root == root)
+            .map(|job| (job.link.clone(), job))
+            .collect();
         let mut rows = div().flex().flex_col();
         for (index, row) in self.files.iter().enumerate() {
             let key = row.file.key.clone();
@@ -415,6 +478,15 @@ impl SearchApp {
                     .border_color(c(LINE))
                     .child(div().flex_shrink_0().w(px(12.)).child(mark))
                     .child(info)
+                    .when_some(row.url.as_ref(), |el, url| {
+                        el.child(self.download_button(
+                            index,
+                            key.clone(),
+                            &row.file.name,
+                            jobs.get(url),
+                            cx,
+                        ))
+                    })
                     .when(row.url.is_some(), |el| {
                         el.child(self.copy_button(
                             ("copy", index),
@@ -492,6 +564,79 @@ impl SearchApp {
             .into_any_element()
     }
 
+    /// Per-file download control. Its label follows the queued job: progress
+    /// while active (click opens the queue), `saved` once done (click shows
+    /// the file), `retry` after a failure.
+    fn download_button(
+        &self,
+        index: usize,
+        key: String,
+        name: &str,
+        job: Option<&Job>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        enum Click {
+            Download,
+            Queue,
+            Reveal(std::path::PathBuf),
+        }
+        let (label, hex, a11y, click): (SharedString, u32, String, Click) = match job {
+            Some(job) if job.status.is_active() => {
+                let label = match (&job.status, job.total) {
+                    (Status::Downloading, Some(total)) if total > 0 => {
+                        format!("{:.0}%", job.received as f64 * 100. / total as f64).into()
+                    }
+                    (Status::Downloading, _) => "downloading".into(),
+                    (Status::Resolving, _) => "starting".into(),
+                    _ => "queued".into(),
+                };
+                let a11y = format!("{name}: {label}. Open downloads");
+                (label, ACCENT, a11y, Click::Queue)
+            }
+            Some(Job {
+                status: Status::Done,
+                path: Some(path),
+                ..
+            }) if path.exists() => (
+                "saved".into(),
+                ACCENT,
+                format!("Show {name} in folder"),
+                Click::Reveal(path.clone()),
+            ),
+            Some(Job {
+                status: Status::Failed(_),
+                ..
+            }) => (
+                "retry".into(),
+                WARN,
+                format!("Download failed. Retry {name}"),
+                Click::Download,
+            ),
+            _ => (
+                "download".into(),
+                DIM,
+                format!("Download {name}"),
+                Click::Download,
+            ),
+        };
+        Button::new(("download", index))
+            .custom(ghost_button(cx, hex))
+            .small()
+            .flex_shrink_0()
+            .min_w(px(84.))
+            .border_1()
+            .border_color(if hex == DIM { c(LINE_HI) } else { ca(hex, 0.4) })
+            .cursor_pointer()
+            .accessibility_label(a11y)
+            .label(label)
+            .on_click(cx.listener(move |this, _, window, cx| match &click {
+                Click::Download => this.download(Some(&key), window, cx),
+                Click::Queue => this.open_queue(window, cx),
+                Click::Reveal(path) => cx.reveal_path(path),
+            }))
+            .into_any_element()
+    }
+
     fn render_footer(&self) -> impl IntoElement {
         let modifier = if cfg!(target_os = "macos") {
             "⌘"
@@ -530,6 +675,19 @@ impl SearchApp {
                         }),
                 )
             })
+            .when_some(self.note.clone(), |el, (text, error)| {
+                el.child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .text_color(if error { c(WARN) } else { c(ACCENT) })
+                        .child(text)
+                        .with_animation(("download-note", self.note_seq), fade(), |el, t| {
+                            el.opacity(t)
+                        }),
+                )
+            })
             .when(!self.files.is_empty(), |el| {
                 el.child(format!("{}/{} links", self.ready(), self.files.len()))
             })
@@ -548,10 +706,19 @@ impl Render for SearchApp {
             .bg(c(BG))
             .text_color(c(TEXT))
             .text_sm()
+            .relative()
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
-                this.input.update(cx, |input, cx| input.focus(window, cx))
+                if this.modal.is_none() {
+                    this.input.update(cx, |input, cx| input.focus(window, cx))
+                }
             }))
-            .child(self.render_header())
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.modal.is_some() && event.keystroke.key == "escape" {
+                    this.close_modal(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(self.render_header(cx))
             .child(self.render_command(cx))
             .child(self.render_activity())
             .child(
@@ -567,6 +734,9 @@ impl Render for SearchApp {
                     .child(self.render_detail(cx)),
             )
             .child(self.render_footer())
+            .when_some(self.modal, |el, modal| {
+                el.child(self.render_modal(modal, cx))
+            })
     }
 }
 
@@ -608,11 +778,11 @@ fn working(label: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-fn note(text: &'static str) -> impl IntoElement {
+pub(crate) fn note(text: &'static str) -> impl IntoElement {
     div().p_2().text_color(c(FAINT)).child(text)
 }
 
-fn fault(message: &str) -> impl IntoElement {
+pub(crate) fn fault(message: &str) -> impl IntoElement {
     div()
         .m_1()
         .px_3()

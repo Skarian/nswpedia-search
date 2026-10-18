@@ -10,8 +10,37 @@ Project location: C:\Users\Neil\projects\nswpedia-search.
 Search with Enter or the search button. The first result resolves automatically.
 Select another title to resolve it; source-page buttons open the original page
 in your default browser. Copy individual URLs or all ready URLs. Ctrl+L (Cmd+L
-on macOS) focuses search. No recent-search UI. URLs are 1fichier landing links;
-the app does not download files or verify their availability.
+on macOS) focuses search. No recent-search UI. URLs are 1fichier landing links.
+
+## Real-Debrid downloads
+
+Open **settings** (top right), paste your private API token from
+https://real-debrid.com/apitoken, optionally press **verify**, and **save**. The
+token is stored in Windows Credential Manager (macOS Keychain on Mac), never in
+files or logs; the input is masked and is cleared when the dialog closes.
+The download folder defaults to your Downloads folder; settings are saved in
+the OS config directory as `settings.json`.
+
+**download** next to a ready link, or **download all**, sends each 1fichier link
+to Real-Debrid (`POST /rest/1.0/unrestrict/link`) and streams the returned file
+to `<download folder>\<result title>\<file name>`. The **↓** button opens the
+queue with progress, speed, cancel, retry, and show-in-folder actions.
+
+- Two downloads run at once; the rest wait in the queue. Re-clicking a link that
+  is queued, running or already saved does nothing; failed or cancelled jobs
+  restart.
+- Folder and file names are sanitized to a single safe path component (no
+  separators, `..`, drive colons, wildcards, reserved device names or trailing
+  dots). Existing files are never replaced: a name such as `Game (1).nsp` is
+  used instead.
+- Data is written to `<file>.<hash>.part` and renamed when complete and the size
+  matches. Failed downloads keep the part file and resume with an HTTP range
+  request on retry, including after a restart; cancelled ones delete it.
+- The token is only sent to `api.real-debrid.com` in the `Authorization` header.
+  Download links must be HTTPS and redirects must stay HTTPS.
+- The queue is in memory: closing the app stops active downloads and clears
+  the list (part files remain and resume when the same link is downloaded
+  again).
 
 ## Build
 
@@ -26,6 +55,8 @@ Tools with the C++ desktop workload, Windows SDK and CMake. Run:
 # Optimized distribution build:
 .\scripts\Build-Windows.ps1 -Release
 .\dist\windows\nswpedia-search.exe
+# Package into another folder (e.g. while a copy is running from dist\windows):
+.\scripts\Build-Windows.ps1 -Release -Name windows-test
 ```
 
 The Windows output folder/zip includes Microsoft's redistributable
@@ -57,6 +88,10 @@ The checker uses the same Rust resolver as the GUI. Its optional second argument
 is a SQLite path, useful for measuring a fresh cache. It reports time to the
 first landing link, not download speed. Unit tests cover parser boundaries,
 ad rejection, cache persistence/expiry, concurrent deduplication and cancellation.
+Real-Debrid and download tests run against a local mock HTTP server: request
+shape and bearer header, error-code mapping (token never echoed), HTTPS
+enforcement, safe names, no-overwrite saving, duplicate suppression, resume
+after failure, and cancellation. No account or network is needed.
 
 ## Implementation
 
@@ -73,7 +108,8 @@ ad rejection, cache persistence/expiry, concurrent deduplication and cancellatio
 - UI work stays on the main thread; HTTP/parsing/cache work uses worker threads.
   Only NSWpedia source URLs and HTTPS 1fichier landing URLs are accepted.
 - Source-page layout changes surface errors and a retry action. No automated
-  crawl, alternate mirror probing, credentials, or authenticated API use.
+  crawl or alternate mirror probing. The only authenticated API is Real-Debrid,
+  used only when you press download or verify.
 
 The interface is a restrained, terminal-inspired dark design: monospace type,
 one muted green accent, and brief fades plus small spinners while work is in
