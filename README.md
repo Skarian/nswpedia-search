@@ -21,7 +21,7 @@ recent lookups in a local cache, and needs nothing else installed.
 Search with **Enter**. Results appear on the left and the first one opens on the
 right. Its files are resolved in the background and each one gets a ✓ and its
 link as soon as it's ready. Pick another title to see its files, or use
-**source ↗** to open the original NSWpedia page in your browser.
+**source** to open the original NSWpedia page in your browser.
 
 ![NSWpedia Search showing four results for "Hollow Knight" and three files with ready 1fichier links](docs/assets/readme/search.png)
 
