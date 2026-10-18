@@ -3,3 +3,4 @@
 /reports/**/*.png
 *.log
 *.sqlite*
+/tools/icon-gen/target/
