@@ -186,12 +186,19 @@ cargo run --release --manifest-path tools/icon-gen/Cargo.toml -- assets/icon
 
 ## CI and releases
 
-`.github/workflows/ci.yml` runs on every branch push: formatting, unit tests on
-all platforms, the Windows installer with a silent install → upgrade →
-uninstall test (settings and credential preservation, launching the installed
-app), and DMGs for Apple Silicon (`macos-15`) and Intel (`macos-15-intel`)
-runners that are installed from the image and launched. Packages are kept as
-workflow artifacts for 14 days.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`:
+formatting, resolver tests, and release-profile tests on Windows and Apple
+Silicon. It doesn't package anything. On `main` it also saves the dependency
+cache that release builds restore.
+
+`.github/workflows/build.yml` builds the installers. It runs for release tags
+and can be started by hand (Actions → Build → Run workflow) to get installers
+for any branch, kept as workflow artifacts for 14 days. Each platform compiles
+once: tests reuse the release build. Windows builds the installer and runs a
+silent install → upgrade → uninstall test (settings and credential
+preservation, launching the installed app). Both macOS DMGs compile on the
+Apple Silicon runner (`macos-15`); the arm64 DMG is installed and launched
+there, the Intel DMG on a real Intel runner (`macos-15-intel`).
 
 To release, follow the checklist in AGENTS.md (including the one-minute
 publish dry run, `bash scripts/test-release-publish.sh`), then push a tag
@@ -210,7 +217,7 @@ the repository's **Latest** release in the sidebar; `-rc` tags are published
 as **Pre-release** and don't replace Latest. If any job fails, nothing is
 published. Only the final job has `contents: write`;
 actions are pinned to commit SHAs; the Rust toolchain and Inno Setup
-(SHA-256-checked) are pinned; release builds don't use the dependency cache.
+(SHA-256-checked) are pinned; caches are only written from `main`.
 Artifacts contain only the built app; no credentials or API keys are involved
 beyond the workflow's own short-lived GitHub token.
 

@@ -35,6 +35,21 @@ If a release run fails before publishing, nothing is public. Fix the problem,
 merge the fix, then move the tag to the new `main` commit
 (`git push origin :refs/tags/vX.Y.Z`, re-tag, push).
 
+## CI cost and speed
+
+- `ci.yml` (pull requests and `main`) only runs formatting and tests. Never add
+  packaging or extra platforms to it, and never trigger on every branch push.
+  An early setup that did burned through the account's Actions minutes in a
+  day (private-repo macOS minutes bill at 10x, Windows at 2x).
+- Packaging lives in `build.yml`: release tags, or run by hand.
+- Each platform compiles once in the release profile; tests reuse it. Keep
+  `cargo test` flags and the rust-cache `shared-key` aligned with the
+  packaging build, or the cache stops helping.
+- Compile macOS on the Apple Silicon runner (both architectures); the Intel
+  runner only runs `scripts/smoke-macos.sh x64` on the finished DMG.
+- Validate workflow edits locally first: `actionlint` (no errors) and, for
+  `release.yml`, `bash scripts/test-release-publish.sh`.
+
 ## Identities that must never change
 
 They tie upgrades to existing installs and keep user data reachable:
