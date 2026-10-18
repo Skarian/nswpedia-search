@@ -357,7 +357,8 @@ fn main() -> anyhow::Result<()> {
         colors.primary_hover = ca(ACCENT, 0.85);
         colors.primary_active = ca(ACCENT, 0.7);
         colors.primary_foreground = c(BG);
-        colors.ring = c(LINE_HI);
+        // Keyboard focus ring; it has to stand out against the dark panels.
+        colors.ring = c(ACCENT);
         colors.accent = ca(TEXT, 0.06);
         colors.accent_foreground = c(TEXT);
         colors.popover = c(PANEL);

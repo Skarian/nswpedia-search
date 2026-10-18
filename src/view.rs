@@ -2,7 +2,7 @@
 use super::{FocusSearch, SearchApp, failed_batch};
 use crate::style::*;
 use gpui_kit::component::{
-    Disableable, Sizable, Theme,
+    Disableable, Selectable, Sizable, Theme,
     button::{Button, ButtonCustomVariant, ButtonVariants},
     input::Input,
 };
@@ -79,7 +79,8 @@ impl SearchApp {
                 Button::new("search")
                     .custom(ghost_button(cx, if busy { DIM } else { TEXT }))
                     .px_3()
-                    .accessibility_label("Search")
+                    .cursor_pointer()
+                    .accessibility_label(if busy { "Searching" } else { "Search" })
                     .label(if busy { "searching…" } else { "search ↵" })
                     .on_click(cx.listener(|this, _, _, cx| this.search(false, cx))),
             )
@@ -144,8 +145,8 @@ impl SearchApp {
             } else {
                 ButtonCustomVariant::new(cx)
                     .foreground(ca(TEXT, 0.72))
-                    .hover(ca(TEXT, 0.04))
-                    .active(ca(TEXT, 0.08))
+                    .hover(ca(TEXT, 0.06))
+                    .active(ca(TEXT, 0.14))
             };
             games = games.child(
                 div()
@@ -161,7 +162,10 @@ impl SearchApp {
                             .pl_2()
                             .border_l_2()
                             .border_color(if selected { c(ACCENT) } else { ca(ACCENT, 0.) })
+                            .cursor_pointer()
+                            .selected(selected)
                             .accessibility_label(game.title.clone())
+                            .tooltip(game.title.clone())
                             .child(
                                 div()
                                     .flex_1()
@@ -190,6 +194,8 @@ impl SearchApp {
                         Button::new(("source", index))
                             .custom(ghost_button(cx, FAINT))
                             .small()
+                            .cursor_pointer()
+                            .accessibility_label(format!("Open source page for {}", game.title))
                             .label("↗")
                             .tooltip("Open source page")
                             .on_click(move |_, _, cx| cx.open_url(&url)),
@@ -204,6 +210,7 @@ impl SearchApp {
                     .custom(ghost_button(cx, DIM))
                     .w_full()
                     .mt_1()
+                    .when(!self.search_busy, |el| el.cursor_pointer())
                     .accessibility_label("More results")
                     .label(if self.search_busy {
                         "loading…"
@@ -289,7 +296,8 @@ impl SearchApp {
                         Button::new("source-page")
                             .custom(ghost_button(cx, DIM))
                             .small()
-                            .accessibility_label("Source page")
+                            .cursor_pointer()
+                            .accessibility_label("Open source page")
                             .label("source ↗")
                             .on_click(move |_, _, cx| cx.open_url(&source)),
                     ),
@@ -316,7 +324,13 @@ impl SearchApp {
                     )
                     .child(div().flex_1())
                     .when(ready > 1, |el| {
-                        el.child(self.copy_button("copy-all", None, "copy all", cx))
+                        el.child(self.copy_button(
+                            "copy-all",
+                            None,
+                            "copy all",
+                            "Copy all links".into(),
+                            cx,
+                        ))
                     }),
             );
         let mut list = div()
@@ -402,7 +416,13 @@ impl SearchApp {
                     .child(div().flex_shrink_0().w(px(12.)).child(mark))
                     .child(info)
                     .when(row.url.is_some(), |el| {
-                        el.child(self.copy_button(("copy", index), Some(key.clone()), "copy", cx))
+                        el.child(self.copy_button(
+                            ("copy", index),
+                            Some(key.clone()),
+                            "copy",
+                            format!("Copy link for {}", row.file.name).into(),
+                            cx,
+                        ))
                     }),
             );
         }
@@ -420,6 +440,7 @@ impl SearchApp {
                             .custom(outline_button(cx, WARN))
                             .border_1()
                             .border_color(ca(WARN, 0.4))
+                            .cursor_pointer()
                             .accessibility_label("Retry")
                             .label("retry")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -436,7 +457,8 @@ impl SearchApp {
                     .mt_4()
                     .border_1()
                     .border_color(ca(ACCENT, 0.35))
-                    .accessibility_label("Resolve more")
+                    .cursor_pointer()
+                    .accessibility_label("Resolve next batch")
                     .label("resolve next batch")
                     .on_click(cx.listener(move |this, _, _, cx| this.resolve(offset, cx))),
             );
@@ -453,6 +475,7 @@ impl SearchApp {
         id: impl Into<ElementId>,
         key: Option<String>,
         label: &'static str,
+        name: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let copied = self.copied.as_deref() == Some(key.as_deref().unwrap_or("all"));
@@ -462,7 +485,8 @@ impl SearchApp {
             .flex_shrink_0()
             .border_1()
             .border_color(if copied { ca(ACCENT, 0.4) } else { c(LINE_HI) })
-            .accessibility_label(if key.is_some() { "Copy" } else { "Copy all" })
+            .cursor_pointer()
+            .accessibility_label(name)
             .label(if copied { "copied" } else { label })
             .on_click(cx.listener(move |this, _, _, cx| this.copy(key.as_deref(), cx)))
             .into_any_element()
@@ -493,6 +517,7 @@ impl SearchApp {
             .text_color(c(FAINT))
             .child(hint(format!("{modifier}l"), "focus"))
             .child(hint("enter".into(), "search"))
+            .child(hint("tab".into(), "next"))
             .child(hint(format!("{modifier}q"), "quit"))
             .child(div().flex_1())
             .when(self.copied.is_some(), |el| {

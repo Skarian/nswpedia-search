@@ -12,7 +12,8 @@ pub const ACCENT: u32 = 0x8fcf9f;
 pub const WARN: u32 = 0xd9a066;
 pub const TEXT: u32 = 0xd6d8dc;
 pub const DIM: u32 = 0x80858e;
-pub const FAINT: u32 = 0x4a4f57;
+/// Lowest-emphasis text, kept near 3.7:1 against `PANEL` so it stays legible.
+pub const FAINT: u32 = 0x6b7079;
 
 pub fn c(hex: u32) -> Hsla {
     rgb(hex).into()
@@ -36,13 +37,16 @@ pub fn spinner(t: f32) -> &'static str {
     SPINNER[((t * SPINNER.len() as f32) as usize).min(SPINNER.len() - 1)]
 }
 
+// The kit keeps the arrow cursor on buttons, so every clickable button in the
+// view also calls `.cursor_pointer()` to show that it can be pressed.
+
 /// Flat, borderless button that tints on hover.
 pub fn ghost_button(cx: &App, hex: u32) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
         .color(ca(hex, 0.))
         .foreground(c(hex))
-        .hover(ca(TEXT, 0.06))
-        .active(ca(TEXT, 0.1))
+        .hover(ca(TEXT, 0.07))
+        .active(ca(TEXT, 0.16))
 }
 
 /// Outlined button for the primary actions.
@@ -50,6 +54,6 @@ pub fn outline_button(cx: &App, hex: u32) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
         .color(ca(hex, 0.04))
         .foreground(c(hex))
-        .hover(ca(hex, 0.1))
-        .active(ca(hex, 0.16))
+        .hover(ca(hex, 0.12))
+        .active(ca(hex, 0.24))
 }
