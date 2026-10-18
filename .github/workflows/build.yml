@@ -1,6 +1,9 @@
-# Builds, tests and packages the installers for every platform.
-# Called by release.yml for version tags; can also be run by hand
-# (Actions → Build → Run workflow) to get installers for any branch.
+# Builds, tests and packages the installers for every platform, then bundles
+# the exact tested files with SHA256SUMS.txt and provenance.json as the
+# artifact release-assets-<source tree>, which release.yml publishes unchanged.
+# Called by ci.yml (pull requests that change packaging inputs) and by
+# release.yml when no tested assets exist for the release commit's tree. Can
+# also be run by hand (Actions → Build → Run workflow).
 #
 # Speed: each platform compiles once, in the release profile (tests reuse the
 # same build), and restores the dependency cache that CI saves on main. Both
@@ -21,20 +24,6 @@ env:
   INNO_SETUP_SHA256: 9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732
 
 jobs:
-  checks:
-    name: Format and version
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Rust ${{ env.RUST_TOOLCHAIN }}
-        run: |
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
-          rustup default "$RUST_TOOLCHAIN"
-      - run: cargo fmt --all --check
-      - run: bash scripts/version.sh
-
   windows:
     name: Windows x64
     runs-on: windows-2025
@@ -126,3 +115,31 @@ jobs:
         run: |
           echo "Runner CPU: $(uname -m), macOS $(sw_vers -productVersion)"
           bash scripts/smoke-macos.sh x64
+
+  bundle:
+    name: Bundle tested assets
+    needs: [windows, macos, macos-intel]
+    runs-on: ubuntu-24.04
+    outputs:
+      tree: ${{ steps.bundle.outputs.tree }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - id: bundle
+        run: |
+          eval "$(bash scripts/version.sh)"
+          tree=$(git rev-parse 'HEAD^{tree}')
+          bash scripts/bundle-assets.sh create release-assets "$VERSION" "$tree" "$GITHUB_SHA" "$GITHUB_RUN_ID"
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets-${{ steps.bundle.outputs.tree }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
