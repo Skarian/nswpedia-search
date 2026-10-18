@@ -12,13 +12,13 @@ You can also use the GitHub CLI:
 | Mac with Apple silicon (Apple menu → **About This Mac** shows **Chip: Apple M…**) | `nswpedia-search-<version>-macos-arm64.dmg` |
 | Mac with an Intel processor (**Processor: Intel**) | `nswpedia-search-<version>-macos-x64.dmg` |
 
-macOS 15 or newer is required.
+You need macOS 15 or newer.
 
 ## Why your system warns you
 
 The builds are free and unsigned: no paid Windows code-signing certificate, no
 Apple Developer ID and no notarization. Windows and macOS can't tell who made
-the app, so they ask you to confirm the first time. Only approve files you
+the app, so they warn you the first time. Only approve files you
 downloaded from this repository's releases. To check a download, compare it with
 the release's `SHA256SUMS.txt`:
 
@@ -32,9 +32,9 @@ shasum -a 256 nswpedia-search-<version>-macos-arm64.dmg         # macOS (Termina
 
 ## Windows 10/11 (64-bit)
 
-1. Download the setup file. Edge or Chrome may say it *isn't commonly
-   downloaded*; choose **Keep** (in Edge: **…** → **Keep** → **Show more** →
-   **Keep anyway**).
+1. Download the setup file. Edge or Chrome may say that it *isn't commonly
+   downloaded*. Choose **Keep**. In Edge, select **…** → **Keep** →
+   **Show more** → **Keep anyway**.
 2. Run it. SmartScreen shows **Windows protected your PC** (*Unknown
    publisher*). Click **More info**, then **Run anyway**.
 3. The installer doesn't need administrator rights. It installs for your user
@@ -42,9 +42,8 @@ shasum -a 256 nswpedia-search-<version>-macos-arm64.dmg         # macOS (Termina
    shortcut and, if you tick the box, a desktop shortcut.
 
 **Smart App Control** (Windows 11) blocks unsigned apps and doesn't offer
-**Run anyway**. The only way to run the app then is to turn Smart App Control
-off in **Windows Security → App & browser control → Smart App Control
-settings**. That's a system-wide security setting, so decide for yourself
+**Run anyway**. To run the app, you must disable Smart App Control in
+**Windows Security → App & browser control → Smart App Control settings**. That's a system-wide security setting, so decide for yourself
 whether it's worth it.
 
 **Portable version:** unzip the `-portable.zip` anywhere and run
@@ -63,9 +62,11 @@ Uninstall** (or Control Panel).
 2. Open the app from Applications. macOS shows **"NSWpedia Search" Not
    Opened** (*Apple could not verify "NSWpedia Search" is free of malware…*).
    Click **Done**, not **Move to Trash**.
-3. Open **System Settings → Privacy & Security**, scroll to **Security**, click
-   **Open Anyway** next to *"NSWpedia Search" was blocked…*, enter your
-   password, and click **Open Anyway** again. From then on it opens normally.
+3. Open **System Settings → Privacy & Security** and scroll to **Security**.
+4. Find the message *"NSWpedia Search" was blocked…* and click
+   **Open Anyway** next to it.
+5. Enter your password and click **Open Anyway** again. After this, the app
+   opens normally.
 
 Since macOS 15, Control-clicking the app and choosing **Open** no longer skips
 this check. If you prefer Terminal, this removes the download quarantine flag
@@ -78,19 +79,19 @@ xattr -dr com.apple.quarantine "/Applications/NSWpedia Search.app"
 Files downloaded with `gh release download` normally aren't quarantined, so the
 prompt usually doesn't appear for them.
 
-**Upgrade:** drag the new version onto Applications and choose **Replace**. The
-**Open Anyway** step is needed once for each downloaded version. Because each
-build carries a new free (ad-hoc) signature, the first time a new version reads
-your saved Real-Debrid token macOS may ask whether *NSWpedia Search* may use
-confidential information stored in your keychain. Enter your login password and
-click **Always Allow**. Your token is kept.
+**Upgrade:** drag the new version onto Applications and choose **Replace**. You
+must do the **Open Anyway** step once for each version that you download.
+Each build has a new free (ad-hoc) signature. When a new version first reads
+your saved Real-Debrid token, macOS may ask whether *NSWpedia Search* may use
+confidential information in your keychain. Enter your login password and click
+**Always Allow**. The token stays in your keychain.
 
 **Uninstall:** drag the app to the Trash.
 
 ## Your data
 
 Installing, upgrading and uninstalling only touch the app itself. These stay
-until you delete them:
+until you remove them:
 
 | | Windows | macOS |
 | :--- | :--- | :--- |
@@ -102,5 +103,22 @@ until you delete them:
 To remove the token from inside the app, open **settings** and press
 **remove**.
 
-There's no automatic updater. New versions appear on the
-[releases page](https://github.com/Skarian/nswpedia-search/releases).
+## Known limits
+
+- The app reads NSWpedia's public pages. If the site is down or changes its
+  layout, searches fail with an error and a **retry** button until the app
+  gets an update.
+- The links go to 1fichier pages. Without Real-Debrid, you download each file
+  in your browser with 1fichier's usual limits.
+- Two files download at a time. The other files wait in the queue.
+- The download queue is in memory. When you close the app, it stops the
+  downloads and clears the list. Partial files stay on disk. The download
+  continues from that point when you download the same file again.
+- The app never replaces a file that already exists. It saves a new copy, for
+  example `Game (1).nsp`.
+- There is no automatic updater. New versions appear on the
+  [releases page](https://github.com/Skarian/nswpedia-search/releases).
+- CI installs and opens the macOS builds on Apple Silicon and Intel Macs.
+  They have had less hands-on use than the Windows version.
+- The app does not host or share files. You are responsible for what you
+  download and for following the law where you live.
