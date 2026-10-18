@@ -196,15 +196,17 @@ workflow artifacts for 14 days.
 To release, set the version in Cargo.toml, commit, and push a matching tag:
 
 ```sh
-git tag v0.2.0-rc.1
-git push origin v0.2.0-rc.1
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 `.github/workflows/release.yml` checks that the tag equals `v` + the
-Cargo.toml version, rebuilds and tests every platform, and only then creates a
-**draft** GitHub Release with the four installers, `SHA256SUMS.txt` and notes
-from `.github/release-notes.md`. `-rc` tags are marked as prereleases. Review
-the draft and publish it by hand. Only the final job has `contents: write`;
+Cargo.toml version, rebuilds and tests every platform, and only if all of that
+passes publishes a GitHub Release with the four installers, `SHA256SUMS.txt`
+and notes from `.github/release-notes.md`. A stable version (`X.Y.Z`) becomes
+the repository's **Latest** release in the sidebar; `-rc` tags are published
+as **Pre-release** and don't replace Latest. If any job fails, nothing is
+published. Only the final job has `contents: write`;
 actions are pinned to commit SHAs; the Rust toolchain and Inno Setup
 (SHA-256-checked) are pinned; release builds don't use the dependency cache.
 Artifacts contain only the built app; no credentials or API keys are involved

@@ -1,6 +1,6 @@
-# Push a tag matching Cargo.toml (e.g. v0.2.0-rc.1) to build every platform and
-# create a DRAFT GitHub Release. Nothing is published automatically: review
-# the draft and publish it by hand. -rc tags are marked as prereleases.
+# Push a tag matching Cargo.toml (e.g. v0.1.1) to build and test every platform
+# and, only if everything passes, publish a GitHub Release with the installers.
+# X.Y.Z tags become the Latest release; X.Y.Z-rc.N tags are prereleases.
 name: Release
 on:
   push:
@@ -43,8 +43,8 @@ jobs:
     with:
       release: true
 
-  draft-release:
-    name: Draft GitHub Release
+  publish:
+    name: Publish GitHub Release
     needs: [verify, build]
     runs-on: ubuntu-24.04
     permissions:
@@ -86,20 +86,28 @@ jobs:
             cat assets/SHA256SUMS.txt
             echo '```'
           } > "$RUNNER_TEMP/notes.md"
-      - name: Create draft release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           tag="$GITHUB_REF_NAME"
-          flags=()
-          if [[ $PRERELEASE == true ]]; then flags+=(--prerelease); fi
+          # Stable versions become the repository's Latest release; -rc tags are
+          # prereleases and leave Latest unchanged.
+          if [[ $PRERELEASE == true ]]; then
+            flags=(--prerelease --latest=false)
+          else
+            flags=(--prerelease=false --latest)
+          fi
           if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
-            # Re-run for the same tag: refresh the draft, never touch a published release.
+            # Left over from an interrupted run: refresh it. Never touch a published release.
             [[ $draft == true ]] || { echo "::error::$tag is already published"; exit 1; }
             gh release upload "$tag" assets/* --clobber
-            gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+            gh release edit "$tag" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$tag" assets/* --draft --verify-tag "${flags[@]}" \
+            # Upload everything to a draft first so the release never appears half-filled.
+            gh release create "$tag" assets/* --draft --verify-tag \
               --title "NSWpedia Search $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
           fi
+          gh release edit "$tag" --draft=false "${flags[@]}"
+          gh release view "$tag" --json url,isPrerelease --jq '"Published \(.url) (prerelease: \(.isPrerelease))"'
